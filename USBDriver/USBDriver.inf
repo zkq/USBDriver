@@ -1,0 +1,91 @@
+;
+; USBDriver.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=USB
+ClassGuid={36FC9E60-C465-11CF-8056-444553540000}
+Provider=ZhuKeQian
+DriverVer=2/18/2016,1.0.0.1
+CatalogFile=USBDriver.cat
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+USBDriver.sys = 1
+
+
+[DestinationDirs]
+FileList = 12
+
+
+[Manufacturer]
+%ManufacturerName%=Device,NT,NTx86,NTamd64
+
+[Device.NT]
+%DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+[Device.NTx86]
+%DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+[Device.NTamd64]
+%DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+
+
+[Fx2lp.NT]
+CopyFiles=FileList
+AddReg=Fx2lp.AddReg
+[Fx2lp.NT.HW]
+AddReg=Fx2lp.AddReg.Guid
+[Fx2lp.NT.Services]
+Addservice = Fx2lp,2,Fx2lp.AddService
+
+[Fx2lp.NTx86]
+CopyFiles=FileList
+AddReg=Fx2lp.AddReg
+[Fx2lp.NTx86.HW]
+AddReg=Fx2lp.AddReg.Guid
+[Fx2lp.NTx86.Services]
+Addservice = Fx2lp,2,Fx2lp.AddService
+
+[Fx2lp.NTamd64]
+CopyFiles=FileList
+AddReg=Fx2lp.AddReg
+[Fx2lp.NTamd64.HW]
+AddReg=Fx2lp.AddReg.Guid
+[Fx2lp.NTamd64.Services]
+Addservice = Fx2lp,2,Fx2lp.AddService
+
+
+[Fx2lp.AddReg]
+HKR,,DevLoader,,*ntkern
+HKR,,NTMPDriver,,USBDriver.sys
+
+HKR,,DriverBase,,USBDriver.sys
+HKR,"Parameters","MaximumTransferSize",0x10001,4096
+HKR,"Parameters","DebugLevel",0x10001,2
+HKR,,FriendlyName,,%DeviceDesc%
+
+[Fx2lp.AddReg.Guid]
+HKR,,DriverGUID,,%Fx2lp.GUID%
+
+[Fx2lp.AddService]
+DisplayName    = %DeviceDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\USBDriver.sys
+AddReg         = Fx2lp.AddReg
+LoadOrderGroup = Base
+
+[FileList]
+USBDriver.sys
+
+
+
+[Strings]
+ManufacturerName="Cypress"
+ClassName=""
+DiskName="USBDriver Source Disk"
+DeviceDesc="Cypress Fx2lp Device"
+Fx2lp.GUID="{AE18AA60-7F6A-11d4-97DD-00010229B959}"
