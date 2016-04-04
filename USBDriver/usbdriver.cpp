@@ -1,22 +1,59 @@
 
-
 #include "usbdriver.h"
+#include <windef.h>
+
 
 #pragma INITCODE
 extern "C"
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegistryPath)
 {
-	KdPrint(("Enter DriverEntry\n"));
+	KdPrint(("mydriver:Enter DriverEntry\n"));
+	
+	DisplayProcessName();
 
 	pDriverObject->DriverExtension->AddDevice = addDevice;
+
+	//即插即用消息
 	pDriverObject->MajorFunction[IRP_MJ_PNP] = pnp;
-	pDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] =
-		pDriverObject->MajorFunction[IRP_MJ_CREATE] =
-		pDriverObject->MajorFunction[IRP_MJ_READ] =
-		pDriverObject->MajorFunction[IRP_MJ_WRITE] = dispatchRoutine;
+	//电源管理消息
+	pDriverObject->MajorFunction[IRP_MJ_POWER] = dispatchRoutine;
+
+	//createfile
+	pDriverObject->MajorFunction[IRP_MJ_CREATE] = dispatchRoutine; 
+	//closehandle
+	pDriverObject->MajorFunction[IRP_MJ_CLOSE] = dispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_CLEANUP] = dispatchRoutine;
+	//deviceiocontrol
+	pDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = deviceIOControl;
+	//readfile
+	pDriverObject->MajorFunction[IRP_MJ_READ] = dispatchRoutine;
+	//writefile
+	pDriverObject->MajorFunction[IRP_MJ_WRITE] = dispatchRoutine;
+
+
 	pDriverObject->DriverUnload = unload;
 
-	KdPrint(("Leave DriverEntry\n"));
+	pDriverObject->DeviceObject;
+	pDriverObject->DriverExtension->AddDevice;
+	pDriverObject->DriverExtension->Count;
+	pDriverObject->DriverExtension->DriverObject;
+	pDriverObject->DriverExtension->ServiceKeyName;
+	pDriverObject->DriverInit;
+	pDriverObject->DriverName;
+	pDriverObject->DriverSection;
+	pDriverObject->DriverSize;
+	pDriverObject->DriverStart;
+	pDriverObject->DriverStartIo;
+	pDriverObject->DriverUnload;
+	pDriverObject->FastIoDispatch;
+	pDriverObject->Flags;
+	pDriverObject->HardwareDatabase;
+	pDriverObject->MajorFunction;
+	pDriverObject->Size;
+	pDriverObject->Type;
+
+
+	KdPrint(("mydriver:Leave DriverEntry**************\n"));
 	return STATUS_SUCCESS;
 }
 
@@ -25,12 +62,41 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegist
 NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject)
 {
 	PAGED_CODE();
-	KdPrint(("Enter addDevice"));
+	KdPrint(("mydriver:Enter addDevice"));
+	DisplayProcessName();
 
 	UNICODE_STRING devName;
 	RtlInitUnicodeString(&devName, L"\\Device\\USBDevice");
 
 	PDEVICE_OBJECT fdo;
+	fdo->ActiveThreadCount;
+	fdo->AlignmentRequirement;
+	fdo->AttachedDevice;
+	fdo->Characteristics;
+	fdo->CurrentIrp;
+	fdo->DeviceExtension;
+	fdo->DeviceLock;
+	fdo->DeviceObjectExtension;
+	fdo->DeviceQueue;
+	fdo->DeviceType;
+	fdo->Dpc;
+	fdo->DriverObject;
+	fdo->Flags;
+	fdo->NextDevice;
+	fdo->Queue;
+	fdo->ReferenceCount;
+	fdo->Reserved;
+	fdo->SectorSize;
+	fdo->SecurityDescriptor;
+	fdo->Size;
+	fdo->Spare1;
+	fdo->StackSize;
+	fdo->Timer;
+	fdo->Type;
+	fdo->Vpb;
+
+
+
 	NTSTATUS status = IoCreateDevice(pDriverObject, sizeof(DEVICE_EXTENSION), &devName, FILE_DEVICE_SERIAL_PORT, 0, false, &fdo);
 	if (!NT_SUCCESS(status))
 	{
@@ -61,59 +127,26 @@ NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDevice
 	fdo->Flags |= DO_BUFFERED_IO | DO_POWER_PAGABLE;
 	fdo->Flags &= ~DO_DEVICE_INITIALIZING;
 
-	KdPrint(("Leave addDevice"));
+	KdPrint(("mydriver:Leave addDevice**************"));
 	return STATUS_SUCCESS;
 }
 
 
 #pragma PAGEDCODE
-NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	PAGED_CODE();
-	KdPrint(("Enter defaultpnphandler"));
-
-	IoSkipCurrentIrpStackLocation(pIrp);
-
-	KdPrint(("Leave defaultpnphandler"));
-	return IoCallDriver(pdx->NextStackDevice, pIrp);
-
-}
-
-
-#pragma PAGEDCODE
-NTSTATUS RemoveDeviceHandler(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	PAGED_CODE();
-	KdPrint(("Enter removeDeviceHandler"));
-
-	pIrp->IoStatus.Status = STATUS_SUCCESS;
-	NTSTATUS status = DefaultPnpHandler(pdx, pIrp);
-	IoDeleteSymbolicLink(&pdx->ustrSymbolicName);
-
-	if (pdx->NextStackDevice)
-		IoDetachDevice(pdx->NextStackDevice);
-
-	IoDeleteDevice(pdx->fdo);
-
-	KdPrint(("Leave removeDeviceHandler"));
-	return status;
-
-}
-
-#pragma PAGEDCODE
 NTSTATUS pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 {
 	PAGED_CODE();
-	KdPrint(("Enter pnp"));
+	KdPrint(("mydriver:Enter pnp"));
+	DisplayProcessName();
 
 	NTSTATUS status;
 	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION)pFdo->DeviceExtension;
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
 	static NTSTATUS(*fcntab[])(PDEVICE_EXTENSION pdx, PIRP pIrp) =
 	{
+		PnpStartDevice,
 		DefaultPnpHandler,
-		DefaultPnpHandler,
-		RemoveDeviceHandler,
+		PnpRemoveDevice,
 		DefaultPnpHandler,
 		DefaultPnpHandler,
 		DefaultPnpHandler,
@@ -173,27 +206,131 @@ NTSTATUS pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 		"IRP_MN_SURPRISE_REMOVAL",
 	};
 
-	KdPrint(("pnp request (%s)", fcnname[fcn]));
+	KdPrint(("mydriver:pnp request (%s)", fcnname[fcn]));
 	status = (*fcntab[fcn])(pdx, pIrp);
 
-	KdPrint(("Leave pnp"));
+	KdPrint(("mydriver:Leave pnp**************"));
+	return status;
+}
+
+#pragma PAGEDCODE
+NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	PAGED_CODE();
+	IoSkipCurrentIrpStackLocation(pIrp);
+	return IoCallDriver(pdx->NextStackDevice, pIrp);
+}
+
+
+#pragma LOCKEDCODE
+NTSTATUS OnRequestComplete(PDEVICE_OBJECT junk, PIRP pIrp, PKEVENT pEvent)
+{
+	KeSetEvent(pEvent, 0, FALSE);
+	return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
+
+
+#pragma PAGEDCODE
+NTSTATUS ForwardAndWait(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	PAGED_CODE();
+	KdPrint(("mydriver:Enter ForwardAndWait"));
+
+	KEVENT event;
+	KeInitializeEvent(&event, NotificationEvent, FALSE);
+
+	IoCopyCurrentIrpStackLocationToNext(pIrp);
+	IoSetCompletionRoutine(pIrp, (PIO_COMPLETION_ROUTINE)OnRequestComplete, &event, TRUE, TRUE, TRUE);
+
+	IoCallDriver(pdx->NextStackDevice, pIrp);
+	KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+
+	KdPrint(("mydriver:leave ForwardAndWait"));
+	return pIrp->IoStatus.Status;
+}
+
+#pragma PAGEDCODE
+NTSTATUS PnpStartDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	PAGED_CODE();
+	NTSTATUS status = ForwardAndWait(pdx, pIrp);
+
+	if (!NT_SUCCESS(status))
+	{
+		pIrp->IoStatus.Status = status;
+		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+		return status;
+	}
+
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
 	return status;
 }
 
 
+
+#pragma PAGEDCODE
+NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	PAGED_CODE();
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	NTSTATUS status = DefaultPnpHandler(pdx, pIrp);
+	IoDeleteSymbolicLink(&pdx->ustrSymbolicName);
+
+	if (pdx->NextStackDevice)
+		IoDetachDevice(pdx->NextStackDevice);
+
+	IoDeleteDevice(pdx->fdo);
+	return status;
+}
+
+#pragma PAGEDCODE
+NTSTATUS deviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
+{
+	PAGED_CODE();
+	KdPrint(("mydriver:Enter deviceIOControl"));
+	DisplayProcessName();
+
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
+	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+	ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+
+/*	switch (code)
+	{
+	case 1:
+		UCHAR *outBuffer = (UCHAR*)pIrp->AssociatedIrp.SystemBuffer;
+		memset(outBuffer, 0xff, outLen);
+		
+		break;
+	default:
+		break;
+	}*/
+
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	pIrp->IoStatus.Information = outLen;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
+	KdPrint(("mydriver:Leave deviceIOControl**************"));
+	return STATUS_SUCCESS;
+
+}
 
 
 #pragma PAGEDCODE
 NTSTATUS dispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 {
 	PAGED_CODE();
-	KdPrint(("Enter dispatchRoutine"));
+	KdPrint(("mydriver:Enter dispatchRoutine"));
+	DisplayProcessName();
 
 	pIrp->IoStatus.Status = STATUS_SUCCESS;
 	pIrp->IoStatus.Information = 0;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 
-	KdPrint(("Leave dispatchRoutine"));
+	KdPrint(("mydriver:Leave dispatchRoutine**************"));
 	return STATUS_SUCCESS;
 }
 
@@ -201,6 +338,7 @@ NTSTATUS dispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 void unload(IN PDRIVER_OBJECT pDriverObject)
 {
 	PAGED_CODE();
-	KdPrint(("Enter unLoad"));
-	KdPrint(("Leave unLoad"));
+	KdPrint(("mydriver:Enter unLoad"));
+	DisplayProcessName();
+	KdPrint(("mydriver:Leave unLoad**************"));
 }

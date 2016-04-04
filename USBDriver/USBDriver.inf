@@ -31,7 +31,6 @@ FileList = 12
 [Device.NTamd64]
 %DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
 
-
 [Fx2lp.NT]
 CopyFiles=FileList
 AddReg=Fx2lp.AddReg

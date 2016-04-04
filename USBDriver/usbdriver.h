@@ -21,6 +21,7 @@ extern "C"
 #define LOCKEDDATA data_seg()
 #define INITDATA data_seg("INIT")
 
+
 #define arraysize(p) (sizeof(p)/sizeof(p[0]))
 
 typedef struct _DEVICE_EXTERNSION
@@ -31,12 +32,34 @@ typedef struct _DEVICE_EXTERNSION
 	UNICODE_STRING ustrSymbolicName;
 } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 
-
-NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject);
-NTSTATUS pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
-NTSTATUS dispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
-void unload(IN PDRIVER_OBJECT pDriverObject);
-
 extern "C"
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegistryPath);
 
+NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject);
+
+NTSTATUS pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp);
+NTSTATUS PnpStartDevice(PDEVICE_EXTENSION pdx, PIRP pIrp);
+NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp);
+
+
+NTSTATUS dispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS deviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+
+void unload(IN PDRIVER_OBJECT pDriverObject);
+
+
+extern "C"
+{
+NTKERNELAPI
+UCHAR *
+PsGetProcessImageFileName(
+__in PEPROCESS Process
+);
+}
+void DisplayProcessName()
+{
+	PEPROCESS hp = PsGetCurrentProcess();
+	UCHAR* sname = PsGetProcessImageFileName(hp);
+	KdPrint(("mydriver:当前进程:%s", sname));
+}
