@@ -26,10 +26,13 @@ FileList = 12
 
 [Device.NT]
 %DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+%DeviceDesc2%=Fx2lp, USB\VID_04B4&PID_1004
 [Device.NTx86]
 %DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+%DeviceDesc2%=Fx2lp, USB\VID_04B4&PID_1004
 [Device.NTamd64]
 %DeviceDesc%=Fx2lp, USB\VID_04B4&PID_8613
+%DeviceDesc2%=Fx2lp, USB\VID_04B4&PID_1004
 
 [Fx2lp.NT]
 CopyFiles=FileList
@@ -87,4 +90,5 @@ ManufacturerName="Cypress"
 ClassName=""
 DiskName="USBDriver Source Disk"
 DeviceDesc="Cypress Fx2lp Device"
+DeviceDesc2="My Device"
 Fx2lp.GUID="{AE18AA60-7F6A-11d4-97DD-00010229B959}"

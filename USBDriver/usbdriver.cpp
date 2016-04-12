@@ -1,37 +1,43 @@
 
 #include "usbdriver.h"
-#include <windef.h>
+
+extern GUID guid = { 0xae18aa60, 0x7f6a, 0x11d4, 0x97, 0xdd, 0x0, 0x1, 0x2, 0x29, 0xb9, 0x59 };
+void DisplayProcessName()
+{
+	PEPROCESS hp = PsGetCurrentProcess();
+	UCHAR* sname = PsGetProcessImageFileName(hp);
+	MyDbgPrint(("当前进程:%s", sname));
+}
 
 
 #pragma INITCODE
 extern "C"
-NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegistryPath)
+NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING /*pRegistryPath*/)
 {
-	KdPrint(("mydriver:Enter DriverEntry\n"));
-	
+	MyDbgPrint((" Enter DriverEntry\n"));
 	DisplayProcessName();
 
-	pDriverObject->DriverExtension->AddDevice = addDevice;
+	pDriverObject->DriverExtension->AddDevice = AddDevice;
 
 	//即插即用消息
-	pDriverObject->MajorFunction[IRP_MJ_PNP] = pnp;
+	pDriverObject->MajorFunction[IRP_MJ_PNP] = Pnp;
 	//电源管理消息
-	pDriverObject->MajorFunction[IRP_MJ_POWER] = dispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_POWER] = DispatchRoutine;
 
 	//createfile
-	pDriverObject->MajorFunction[IRP_MJ_CREATE] = dispatchRoutine; 
+	pDriverObject->MajorFunction[IRP_MJ_CREATE] = CreateFile;
 	//closehandle
-	pDriverObject->MajorFunction[IRP_MJ_CLOSE] = dispatchRoutine;
-	pDriverObject->MajorFunction[IRP_MJ_CLEANUP] = dispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_CLOSE] = DispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_CLEANUP] = CleanUp;
 	//deviceiocontrol
-	pDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = deviceIOControl;
+	pDriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DeviceIOControl;
 	//readfile
-	pDriverObject->MajorFunction[IRP_MJ_READ] = dispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_READ] = DispatchRoutine;
 	//writefile
-	pDriverObject->MajorFunction[IRP_MJ_WRITE] = dispatchRoutine;
+	pDriverObject->MajorFunction[IRP_MJ_WRITE] = DispatchRoutine;
 
 
-	pDriverObject->DriverUnload = unload;
+	pDriverObject->DriverUnload = Unload;
 
 	pDriverObject->DeviceObject;
 	pDriverObject->DriverExtension->AddDevice;
@@ -43,7 +49,7 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegist
 	pDriverObject->DriverSection;
 	pDriverObject->DriverSize;
 	pDriverObject->DriverStart;
-	pDriverObject->DriverStartIo;
+	pDriverObject->DriverStartIo = StartIO;
 	pDriverObject->DriverUnload;
 	pDriverObject->FastIoDispatch;
 	pDriverObject->Flags;
@@ -53,51 +59,49 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegist
 	pDriverObject->Type;
 
 
-	KdPrint(("mydriver:Leave DriverEntry**************\n"));
+	MyDbgPrint((" Leave DriverEntry**************\n"));
 	return STATUS_SUCCESS;
+}
+
+#pragma LOCKEDCODE
+VOID StartIO(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
+{
+	MyDbgPrint(("enter startio***********"));
+
+	KIRQL oldIrql;
+	IoAcquireCancelSpinLock(&oldIrql);
+	if (pIrp != pDev->CurrentIrp || pIrp->Cancel)
+	{
+		IoReleaseCancelSpinLock(oldIrql);
+		MyDbgPrint(("leave startio false"));
+		return;
+	}
+	else{
+		IoSetCancelRoutine(pIrp, NULL);
+		IoReleaseCancelSpinLock(oldIrql);
+	}
+
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	pIrp->IoStatus.Information = 0;
+
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	IoStartNextPacket(pDev, TRUE);
+	MyDbgPrint(("leave startio true"));
 }
 
 
 #pragma PAGEDCODE
-NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject)
+NTSTATUS AddDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject)
 {
 	PAGED_CODE();
-	KdPrint(("mydriver:Enter addDevice"));
+	MyDbgPrint((" Enter addDevice"));
 	DisplayProcessName();
 
-	UNICODE_STRING devName;
-	RtlInitUnicodeString(&devName, L"\\Device\\USBDevice");
-
 	PDEVICE_OBJECT fdo;
-	fdo->ActiveThreadCount;
-	fdo->AlignmentRequirement;
-	fdo->AttachedDevice;
-	fdo->Characteristics;
-	fdo->CurrentIrp;
-	fdo->DeviceExtension;
-	fdo->DeviceLock;
-	fdo->DeviceObjectExtension;
-	fdo->DeviceQueue;
-	fdo->DeviceType;
-	fdo->Dpc;
-	fdo->DriverObject;
-	fdo->Flags;
-	fdo->NextDevice;
-	fdo->Queue;
-	fdo->ReferenceCount;
-	fdo->Reserved;
-	fdo->SectorSize;
-	fdo->SecurityDescriptor;
-	fdo->Size;
-	fdo->Spare1;
-	fdo->StackSize;
-	fdo->Timer;
-	fdo->Type;
-	fdo->Vpb;
 
+	NTSTATUS status;
 
-
-	NTSTATUS status = IoCreateDevice(pDriverObject, sizeof(DEVICE_EXTENSION), &devName, FILE_DEVICE_SERIAL_PORT, 0, false, &fdo);
+	status = IoCreateDevice(pDriverObject, sizeof(DEVICE_EXTENSION), NULL, FILE_DEVICE_UNKNOWN, 0, false, &fdo);
 	if (!NT_SUCCESS(status))
 	{
 		return status;
@@ -106,239 +110,201 @@ NTSTATUS addDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDevice
 	PDEVICE_EXTENSION pDevEx = reinterpret_cast<PDEVICE_EXTENSION>(fdo->DeviceExtension);
 	pDevEx->fdo = fdo;
 	pDevEx->NextStackDevice = IoAttachDeviceToDeviceStack(fdo, pPhyDeviceObject);
-
-
-	UNICODE_STRING symLinkName;
-	RtlInitUnicodeString(&symLinkName, L"\\DosDevices\\USBDevice");
-
-	pDevEx->ustrDeviceName = devName;
-	pDevEx->ustrSymbolicName = symLinkName;
-	status = IoCreateSymbolicLink(&symLinkName, &devName);
+	PLIST_ENTRY entry = (PLIST_ENTRY)ExAllocatePool(PagedPool, sizeof(LIST_ENTRY));
+	InitializeListHead(entry);
+	pDevEx->pIrpListHead = entry;
+	
+	pDevEx->confDesc = NULL;
+	pDevEx->deviceDesc = NULL;
+	pDevEx->pipeInfos = NULL;
+	pDevEx->UsbdHandle = NULL;
+	status = USBD_CreateHandle(fdo, pDevEx->NextStackDevice, USBD_CLIENT_CONTRACT_VERSION_602, 1001, &pDevEx->UsbdHandle);
 	if (!NT_SUCCESS(status))
 	{
-		IoDeleteSymbolicLink(&pDevEx->ustrSymbolicName);
-		status = IoCreateSymbolicLink(&symLinkName, &devName);
-		if (!NT_SUCCESS(status))
-		{
-			return status;
-		}
+		MyDbgPrint(("USBD_CreateHandle failed!!!!"))
+	}
+
+
+
+	//创建设备接口
+	status = IoRegisterDeviceInterface(pPhyDeviceObject, &guid, NULL, &pDevEx->ustrSymbolicName);
+	if (!NT_SUCCESS(status))
+	{
+		IoDeleteDevice(fdo);
+		return status;
+	}
+	MyDbgPrint((" symbolicName %wZ", &pDevEx->ustrSymbolicName));
+
+	status = IoSetDeviceInterfaceState(&pDevEx->ustrSymbolicName, TRUE);
+	if (!NT_SUCCESS(status))
+	{
+		return status;
 	}
 
 	fdo->Flags |= DO_BUFFERED_IO | DO_POWER_PAGABLE;
 	fdo->Flags &= ~DO_DEVICE_INITIALIZING;
 
-	KdPrint(("mydriver:Leave addDevice**************"));
+	MyDbgPrint((" Leave addDevice**************"));
 	return STATUS_SUCCESS;
 }
 
 
 #pragma PAGEDCODE
-NTSTATUS pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
+NTSTATUS CreateFile(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 {
 	PAGED_CODE();
-	KdPrint(("mydriver:Enter pnp"));
+	MyDbgPrint((" Enter createfile"));
 	DisplayProcessName();
 
-	NTSTATUS status;
-	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION)pFdo->DeviceExtension;
-	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
-	static NTSTATUS(*fcntab[])(PDEVICE_EXTENSION pdx, PIRP pIrp) =
-	{
-		PnpStartDevice,
-		DefaultPnpHandler,
-		PnpRemoveDevice,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler, 
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-		DefaultPnpHandler,
-	};
 
-	ULONG fcn = stack->MinorFunction;
-	if (fcn >= arraysize(fcntab))
-	{
-		status = DefaultPnpHandler(pdx, pIrp);
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	pIrp->IoStatus.Information = 0;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 
-		return status;
+	MyDbgPrint((" Leave createfile**************"));
+	return STATUS_SUCCESS;
+}
+
+#pragma PAGEDCODE
+NTSTATUS CleanUp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
+{
+	PAGED_CODE();
+	MyDbgPrint((" Enter CleanUp"));
+	DisplayProcessName();
+
+	PDEVICE_EXTENSION pDevExt = (PDEVICE_EXTENSION)pFdo->DeviceExtension;
+	PIRP_Entry pIrpEntry;
+	while (!IsListEmpty(pDevExt->pIrpListHead))
+	{
+		PLIST_ENTRY pEntry = RemoveHeadList(pDevExt->pIrpListHead);
+		pIrpEntry = CONTAINING_RECORD(pEntry,
+			IRP_Entry,
+			listEntry);
+		pIrpEntry->pIrp->IoStatus.Status = STATUS_SUCCESS;
+		pIrpEntry->pIrp->IoStatus.Information = 0;
+		IoCompleteRequest(pIrpEntry->pIrp, IO_NO_INCREMENT);
+
+		ExFreePool(pIrpEntry);
 	}
 
-	static char *fcnname[] =
+	pIrp->IoStatus.Status = STATUS_SUCCESS;
+	pIrp->IoStatus.Information = 0;
+
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
+
+	MyDbgPrint((" Leave CleanUp**************"));
+	return STATUS_SUCCESS;
+}
+
+
+#pragma PAGEDCODE
+NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
+{
+	PAGED_CODE();
+	MyDbgPrint((" Enter deviceIOControl"));
+	DisplayProcessName();
+
+	static NTSTATUS(*fcntab[NUMBER_OF_ADAPT_IOCTLS])(PDEVICE_EXTENSION pdx, PIRP pIrp) =
 	{
-		"IRP_MN_START_DEVICE",
-		"IRP_MN_QUERY_REMOVE_DEVICE",
-		"IRP_MN_REMOVE_DEVICE",
-		"IRP_MN_CANCLE_REMOVE_DEVICE",
-		"IRP_MN_STOP_DEVICE",
-		"IRP_MN_QUERY_STOP_DEVICE",
-		"IRP_MN_CANCEL_STOP_DEVICE",
-		"IRP_MN_QUERY_DEVICE_RELATIONS",
-		"IRP_MN_QUERY_INTERFACE",
-		"IRP_MN_QUERY_CAPABILITIES",
-		"IRP_MN_QUERY_RESOURCES",
-		"IRP_MN_QUERY_RESOURCE_REQUIREMENTS",
-		"IRP_MN_DEVICE_TEXT",
-		"IRP_MN_FILTER_RESOURCE_REQUIREMENTS",
-		"",
-		"IRP_MN_READ_CONFIG",
-		"IRP_MN_WRITE_CONFIG",
-		"IRP_MN_EJECT",
-		"IRP_MN_SET_LOCK",
-		"IRP_MN_QUERY_ID",
-		"IRP_MN_PNP_DEVICE_STATE",
-		"IRP_MN_BUS_INFORMATION",
-		"IRP_MN_DEVICE_USAGE_NOTIFICATION",
-		"IRP_MN_SURPRISE_REMOVAL",
+		 GetDriverVersion,
+		 GetUSBDIVersion,
+		 GetAltIntSetting,
+		 SelIntface,
+		 GetAddress,
+		 GetNumEndpoints,
+		 GetPwrState,
+		 SetPwrState,
+		 SendEP0Ctl,
+		 SendNonEP0Ctl,
+		 CyclePort,
+		 ResetPipe,
+		 ResetParentPort,
+		 GetTransSize,
+		 SetTransSize,
+		 GetDiName,
+		 GetFriendlyName,
+		 AbortPipe,
+		 SendNonEP0Direct,
+		 GetSpeed,
+		 GetCurrentFrame,
 	};
 
-	KdPrint(("mydriver:pnp request (%s)", fcnname[fcn]));
-	status = (*fcntab[fcn])(pdx, pIrp);
-
-	KdPrint(("mydriver:Leave pnp**************"));
-	return status;
-}
-
-#pragma PAGEDCODE
-NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	PAGED_CODE();
-	IoSkipCurrentIrpStackLocation(pIrp);
-	return IoCallDriver(pdx->NextStackDevice, pIrp);
-}
-
-
-#pragma LOCKEDCODE
-NTSTATUS OnRequestComplete(PDEVICE_OBJECT junk, PIRP pIrp, PKEVENT pEvent)
-{
-	KeSetEvent(pEvent, 0, FALSE);
-	return STATUS_MORE_PROCESSING_REQUIRED;
-}
-
-
-
-#pragma PAGEDCODE
-NTSTATUS ForwardAndWait(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	PAGED_CODE();
-	KdPrint(("mydriver:Enter ForwardAndWait"));
-
-	KEVENT event;
-	KeInitializeEvent(&event, NotificationEvent, FALSE);
-
-	IoCopyCurrentIrpStackLocationToNext(pIrp);
-	IoSetCompletionRoutine(pIrp, (PIO_COMPLETION_ROUTINE)OnRequestComplete, &event, TRUE, TRUE, TRUE);
-
-	IoCallDriver(pdx->NextStackDevice, pIrp);
-	KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
-
-	KdPrint(("mydriver:leave ForwardAndWait"));
-	return pIrp->IoStatus.Status;
-}
-
-#pragma PAGEDCODE
-NTSTATUS PnpStartDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	PAGED_CODE();
-	NTSTATUS status = ForwardAndWait(pdx, pIrp);
-
-	if (!NT_SUCCESS(status))
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
+	PDEVICE_EXTENSION pdx = (PDEVICE_EXTENSION)pFdo->DeviceExtension;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	for (ULONG i = 0; i < NUMBER_OF_ADAPT_IOCTLS; i++)
 	{
+		if (CTL_CODE(FILE_DEVICE_UNKNOWN, i, METHOD_BUFFERED, FILE_ANY_ACCESS) == code)
+		{
+			status = fcntab[i](pdx, pIrp);
+			break;
+		}
+	}
+
+	if (i == NUMBER_OF_ADAPT_IOCTLS)
+	{
+		MyDbgPrint(("didnot match method"));
+		pIrp->IoStatus.Information = 0;
 		pIrp->IoStatus.Status = status;
 		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-		return status;
+		return  status;
 	}
-
-	pIrp->IoStatus.Status = STATUS_SUCCESS;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-
+	MyDbgPrint((" Leave deviceIOControl**************"));
 	return status;
 }
 
 
 
 #pragma PAGEDCODE
-NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
+NTSTATUS DispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 {
 	PAGED_CODE();
-	pIrp->IoStatus.Status = STATUS_SUCCESS;
-	NTSTATUS status = DefaultPnpHandler(pdx, pIrp);
-	IoDeleteSymbolicLink(&pdx->ustrSymbolicName);
-
-	if (pdx->NextStackDevice)
-		IoDetachDevice(pdx->NextStackDevice);
-
-	IoDeleteDevice(pdx->fdo);
-	return status;
-}
-
-#pragma PAGEDCODE
-NTSTATUS deviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
-{
-	PAGED_CODE();
-	KdPrint(("mydriver:Enter deviceIOControl"));
-	DisplayProcessName();
-
-	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
-	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
-	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-	ULONG code = stack->Parameters.DeviceIoControl.IoControlCode;
-
-/*	switch (code)
-	{
-	case 1:
-		UCHAR *outBuffer = (UCHAR*)pIrp->AssociatedIrp.SystemBuffer;
-		memset(outBuffer, 0xff, outLen);
-		
-		break;
-	default:
-		break;
-	}*/
-
-	pIrp->IoStatus.Status = STATUS_SUCCESS;
-	pIrp->IoStatus.Information = outLen;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-
-	KdPrint(("mydriver:Leave deviceIOControl**************"));
-	return STATUS_SUCCESS;
-
-}
-
-
-#pragma PAGEDCODE
-NTSTATUS dispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
-{
-	PAGED_CODE();
-	KdPrint(("mydriver:Enter dispatchRoutine"));
+	MyDbgPrint((" Enter dispatchRoutine"));
 	DisplayProcessName();
 
 	pIrp->IoStatus.Status = STATUS_SUCCESS;
 	pIrp->IoStatus.Information = 0;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 
-	KdPrint(("mydriver:Leave dispatchRoutine**************"));
+	MyDbgPrint((" Leave dispatchRoutine**************"));
 	return STATUS_SUCCESS;
 }
 
 #pragma PAGEDCODE
-void unload(IN PDRIVER_OBJECT pDriverObject)
+void Unload(IN PDRIVER_OBJECT pDriverObject)
 {
 	PAGED_CODE();
-	KdPrint(("mydriver:Enter unLoad"));
+	MyDbgPrint((" Enter unLoad"));
 	DisplayProcessName();
-	KdPrint(("mydriver:Leave unLoad**************"));
+	MyDbgPrint((" Leave unLoad**************"));
+}
+
+VOID CancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
+{
+	MyDbgPrint(("enter cancelirp"));
+	MyDbgPrint(("%s", KeGetCurrentIrql()));
+
+	//当前irp已经出队列，准备由startio处理
+	if (pIrp == pDev->CurrentIrp)
+	{
+
+		pIrp->Cancel = true;
+		IoReleaseCancelSpinLock(pIrp->CancelIrql);
+		IoStartNextPacket(pDev, TRUE);
+		MyDbgPrint(("%s", KeGetCurrentIrql()));
+		//KeLowerIrql()
+	}
+	else
+	{
+		KeRemoveEntryDeviceQueue(&pDev->DeviceQueue, &pIrp->Tail.Overlay.DeviceQueueEntry);
+		IoReleaseCancelSpinLock(pIrp->CancelIrql);
+	}
+
+	pIrp->IoStatus.Status = STATUS_CANCELLED;
+	pIrp->IoStatus.Information = 0;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
+	MyDbgPrint((" Leave cancelirp**************"));
 }
