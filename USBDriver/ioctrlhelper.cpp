@@ -2,6 +2,191 @@
 
 #include "usbdriver.h"
 
+NTSTATUS GetStatus(PDEVICE_EXTENSION pdx, PUSHORT statusInfo, UCHAR target, UCHAR index)
+{
+	PURB urb = NULL;
+	NTSTATUS status;
+	urb = (PURB)ExAllocatePool(NonPagedPool, sizeof(_URB_CONTROL_GET_STATUS_REQUEST));
+	if (!urb)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		MyDbgPrint(("allocate urb failed"));
+		goto Exit;
+	}
+
+	USHORT function = 0;
+	switch (target)
+	{
+	case BMREQUEST_TO_DEVICE:
+		function = URB_FUNCTION_GET_STATUS_FROM_DEVICE;
+		break;
+	case BMREQUEST_TO_INTERFACE:
+		function = URB_FUNCTION_GET_STATUS_FROM_INTERFACE;
+		break;
+	case BMREQUEST_TO_ENDPOINT:
+		function = URB_FUNCTION_GET_STATUS_FROM_ENDPOINT;
+		break;
+	case BMREQUEST_TO_OTHER:
+		function = URB_FUNCTION_GET_STATUS_FROM_OTHER;
+		break;
+	}
+	if (function == 0)
+	{
+		MyDbgPrint(("invalid function"));
+		goto Exit;
+	}
+
+
+	urb->UrbControlGetStatusRequest.Hdr.Function = function;
+	urb->UrbControlGetStatusRequest.Hdr.Length = sizeof(_URB_CONTROL_GET_STATUS_REQUEST);
+	urb->UrbControlGetStatusRequest.TransferBufferLength = 2;
+	urb->UrbControlGetStatusRequest.TransferBuffer = statusInfo;
+	urb->UrbControlGetStatusRequest.Index = index;
+	status = SubmitUrbSync(pdx, urb, FALSE);
+
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("feature failed"));
+	}
+
+Exit:
+	if (urb)
+	{
+		ExFreePool(urb);
+		urb = NULL;
+	}
+	return status;
+
+}
+
+
+NTSTATUS Feature(PDEVICE_EXTENSION pdx, BOOLEAN bset, UCHAR target, USHORT selector, UCHAR index)
+{
+	PURB urb = NULL;
+	NTSTATUS status;
+	urb = (PURB)ExAllocatePool(NonPagedPool, sizeof(_URB_CONTROL_FEATURE_REQUEST));
+	if (!urb)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		MyDbgPrint(("allocate urb failed"));
+		goto Exit;
+	}
+
+	USHORT function = 0;
+	if (bset)
+	{
+		switch (target)
+		{
+			case BMREQUEST_TO_DEVICE:
+				function = URB_FUNCTION_SET_FEATURE_TO_DEVICE;
+			break;
+			case BMREQUEST_TO_INTERFACE:
+				function = URB_FUNCTION_SET_FEATURE_TO_INTERFACE;
+				break;
+			case BMREQUEST_TO_ENDPOINT:
+				function = URB_FUNCTION_SET_FEATURE_TO_ENDPOINT;
+				break;
+			case BMREQUEST_TO_OTHER:
+				function = URB_FUNCTION_SET_FEATURE_TO_OTHER;
+				break;
+		}
+	}
+	else{
+		switch (target)
+		{
+			case BMREQUEST_TO_DEVICE:
+				function = URB_FUNCTION_CLEAR_FEATURE_TO_DEVICE;
+			break;
+			case BMREQUEST_TO_INTERFACE:
+				function = URB_FUNCTION_CLEAR_FEATURE_TO_INTERFACE;
+				break;
+			case BMREQUEST_TO_ENDPOINT:
+				function = URB_FUNCTION_CLEAR_FEATURE_TO_ENDPOINT;
+				break;
+			case BMREQUEST_TO_OTHER:
+				function = URB_FUNCTION_CLEAR_FEATURE_TO_OTHER;
+				break;
+		}
+	}
+	if (function == 0)
+	{
+		MyDbgPrint(("invalid function"));
+		goto Exit;
+	}
+
+
+	urb->UrbControlFeatureRequest.Hdr.Function = function;
+	urb->UrbControlFeatureRequest.Hdr.Length = sizeof(_URB_CONTROL_FEATURE_REQUEST);
+	urb->UrbControlFeatureRequest.FeatureSelector = selector;
+	urb->UrbControlFeatureRequest.Index = index;
+	status = SubmitUrbSync(pdx, urb, FALSE);
+
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("feature failed"));
+	}
+
+Exit:
+	if (urb)
+	{
+		ExFreePool(urb);
+		urb = NULL;
+	}
+	return status;
+
+}
+
+
+NTSTATUS SetAddress(PDEVICE_EXTENSION pdx, UCHAR address)
+{
+	PURB urb = NULL;
+	NTSTATUS status;
+	urb = (PURB)ExAllocatePool(NonPagedPool, sizeof(_URB_CONTROL_TRANSFER));
+	if (!urb)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		MyDbgPrint(("allocate urb failed"));
+		goto Exit;
+	}
+
+	urb->UrbControlTransfer.Hdr.Function = URB_FUNCTION_CONTROL_TRANSFER;
+	urb->UrbControlTransfer.Hdr.Length = sizeof(_URB_CONTROL_TRANSFER);
+	urb->UrbControlTransfer.PipeHandle = NULL;
+	urb->UrbControlTransfer.TransferFlags = USBD_DEFAULT_PIPE_TRANSFER;
+	urb->UrbControlTransfer.TransferBufferLength = 0;
+	urb->UrbControlTransfer.TransferBuffer = NULL;
+	urb->UrbControlTransfer.TransferBufferMDL = NULL;
+	//bmRequestType
+	urb->UrbControlTransfer.SetupPacket[0] = 0;
+	//bRequest
+	urb->UrbControlTransfer.SetupPacket[1] = USB_REQUEST_SET_ADDRESS;
+	//wValue
+	urb->UrbControlTransfer.SetupPacket[2] = address;
+	urb->UrbControlTransfer.SetupPacket[3] = 0;
+	//wIndex
+	urb->UrbControlTransfer.SetupPacket[4] = 0;
+	urb->UrbControlTransfer.SetupPacket[5] = 0;
+	//wLength
+	urb->UrbControlTransfer.SetupPacket[6] = 0;
+	urb->UrbControlTransfer.SetupPacket[7] = 0;
+
+	status = SubmitUrbSync(pdx, urb, FALSE);
+
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("get intfNum failed"));
+	}
+
+Exit:
+	if (urb)
+	{
+		ExFreePool(urb);
+		urb = NULL;
+	}
+	return status;
+}
+
+
 NTSTATUS GetDeviceDesc(PDEVICE_EXTENSION pdx, bool refresh)
 {
 	NTSTATUS status;
@@ -87,6 +272,41 @@ NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh)
 }
 
 
+NTSTATUS GetConfiguration(PDEVICE_EXTENSION pdx, PUCHAR confNum)
+{
+	PURB urb = NULL;
+	NTSTATUS status;
+	urb = (PURB)ExAllocatePool(NonPagedPool, sizeof(_URB_CONTROL_GET_CONFIGURATION_REQUEST));
+	if (!urb)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		MyDbgPrint(("allocate urb failed"));
+		goto Exit;
+	}
+	
+	urb->UrbControlGetConfigurationRequest.Hdr.Function = URB_FUNCTION_GET_CONFIGURATION;
+	urb->UrbControlGetConfigurationRequest.Hdr.Length = sizeof(_URB_CONTROL_GET_CONFIGURATION_REQUEST);
+	urb->UrbControlGetConfigurationRequest.TransferBufferLength = 1;
+	urb->UrbControlGetConfigurationRequest.TransferBuffer = confNum;
+	urb->UrbControlGetConfigurationRequest.TransferBufferMDL = NULL; 
+
+	status = SubmitUrbSync(pdx, urb, FALSE);
+
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("get confNum failed"));
+	}
+
+Exit:
+	if (urb)
+	{
+		ExFreePool(urb);
+		urb = NULL;
+	}
+	return status;
+}
+
+
 NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx)
 {
 	PURB urb = NULL;
@@ -139,7 +359,7 @@ NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx)
 		else
 			interfaceDescriptor = NULL;
 		//interfaceDescriptor = USBD_ParseConfigurationDescriptorEx(
-		//	ConfigurationDescriptor,
+		//	pdx->confDesc,
 		//	StartPosition, // StartPosition 
 		//	-1,            // InterfaceNumber
 		//	0,             // AlternateSetting
@@ -245,6 +465,41 @@ Exit:
 }
 
 
+NTSTATUS GetInterface(PDEVICE_EXTENSION pdx, PUCHAR intfNum)
+{
+	PURB urb = NULL;
+	NTSTATUS status;
+	urb = (PURB)ExAllocatePool(NonPagedPool, sizeof(_URB_CONTROL_GET_INTERFACE_REQUEST));
+	if (!urb)
+	{
+		status = STATUS_INSUFFICIENT_RESOURCES;
+		MyDbgPrint(("allocate urb failed"));
+		goto Exit;
+	}
+
+	urb->UrbControlGetInterfaceRequest.Hdr.Function = URB_FUNCTION_GET_INTERFACE;
+	urb->UrbControlGetInterfaceRequest.Hdr.Length = sizeof(_URB_CONTROL_GET_INTERFACE_REQUEST);
+	urb->UrbControlGetInterfaceRequest.TransferBufferLength = 1;
+	urb->UrbControlGetInterfaceRequest.TransferBuffer = intfNum;
+	urb->UrbControlGetInterfaceRequest.TransferBufferMDL = NULL;
+	urb->UrbControlGetInterfaceRequest.Interface = 0;
+	status = SubmitUrbSync(pdx, urb, FALSE);
+
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("get intfNum failed"));
+	}
+
+Exit:
+	if (urb)
+	{
+		ExFreePool(urb);
+		urb = NULL;
+	}
+	return status;
+}
+
+
 NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum)
 {
 	PURB urb = NULL;
@@ -327,9 +582,7 @@ NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum)
 		goto Exit;
 	}
 
-	status = SubmitUrbSync(
-		pdx,
-		urb);
+	status = SubmitUrbSync(pdx,	urb);
 
 	if (!NT_SUCCESS(status))
 	{
@@ -387,20 +640,12 @@ Exit:
 }
 
 
-NTSTATUS SendNonEP0Data(PDEVICE_EXTENSION pdx, const UCHAR endAddress, PVOID buffer, ULONG bufLen)
+NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen)
 {
 	PURB urb = NULL;
-
 	NTSTATUS  status;
-
-
-	// Allocate and build an URB for the select-configuration request.
-	status = USBD_UrbAllocate(pdx->UsbdHandle, &urb);
-	if (!NT_SUCCESS(status))
-	{
-		goto Exit;
-	}
-
+	
+	//look for  pipe handle
 	USBD_PIPE_HANDLE handle = 0;
 	for (UCHAR i = 0; i < pdx->pipeCount; i++)
 	{
@@ -412,19 +657,38 @@ NTSTATUS SendNonEP0Data(PDEVICE_EXTENSION pdx, const UCHAR endAddress, PVOID buf
 	}
 	if (!handle)
 	{
+		MyDbgPrint(("cannot find this point"));
 		goto Exit;
 	}
 
+	//determin flag
 	ULONG TransferFlags = 0;
 	if (USB_ENDPOINT_DIRECTION_IN(endAddress))
 	{
-		TransferFlags = USBD_TRANSFER_DIRECTION_IN;
+		TransferFlags = USBD_TRANSFER_DIRECTION_IN | USBD_SHORT_TRANSFER_OK;
 	}
-	UsbBuildInterruptOrBulkTransferRequest(urb, sizeof(_URB_BULK_OR_INTERRUPT_TRANSFER), handle, buffer, NULL, bufLen, TransferFlags, NULL);
 
-	status = SubmitUrbSync(
-		pdx,
-		urb);
+
+	if (isoLen)
+	{
+		status = USBD_IsochUrbAllocate(pdx->UsbdHandle, isoLen / sizeof(ISO_PACKET_INFO), &urb);
+		if (!NT_SUCCESS(status))
+		{
+			MyDbgPrint(("USBD_IsochUrbAllocate faild"));
+			goto Exit;
+		}
+	}
+	else{
+		status = USBD_UrbAllocate(pdx->UsbdHandle, &urb);
+		if (!NT_SUCCESS(status))
+		{
+			MyDbgPrint(("USBD_UrbAllocate faild"));
+			goto Exit;
+		}
+		UsbBuildInterruptOrBulkTransferRequest(urb, sizeof(_URB_BULK_OR_INTERRUPT_TRANSFER), handle, buffer, NULL, bufLen, TransferFlags, NULL);
+	}
+
+	status = SubmitUrbSync(pdx, urb);
 
 	if (!NT_SUCCESS(status))
 	{
@@ -432,8 +696,18 @@ NTSTATUS SendNonEP0Data(PDEVICE_EXTENSION pdx, const UCHAR endAddress, PVOID buf
 		goto Exit;
 	}
 
-Exit:
+	if (isoLen)
+	{
+		for (int i = 0; i < urb->UrbIsochronousTransfer.NumberOfPackets; i++)
+		{
+			PISO_PACKET_INFO packetInfo = (PISO_PACKET_INFO)((PUCHAR)isoInfoBuf + sizeof(ISO_PACKET_INFO) * i);
+			packetInfo->Length = urb->UrbIsochronousTransfer.IsoPacket[i].Length;
+			packetInfo->Status = urb->UrbIsochronousTransfer.IsoPacket[i].Status;
+		}
+	}
 
+
+Exit:
 
 	if (urb)
 	{
@@ -441,4 +715,60 @@ Exit:
 	}
 
 	return status;
+}
+
+
+NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single)
+{
+	NTSTATUS status;
+
+	PURB urb;
+	USBD_UrbAllocate(pdx->UsbdHandle, &urb);
+	ULONG transflag = 0;
+	if (single->SetupPacket.bmReqType.Direction == BMREQUEST_DEVICE_TO_HOST)
+	{
+		transflag = USBD_TRANSFER_DIRECTION_IN | USBD_SHORT_TRANSFER_OK;
+	}
+	UsbBuildVendorRequest(urb, URB_FUNCTION_VENDOR_DEVICE,
+		sizeof(_URB_CONTROL_VENDOR_OR_CLASS_REQUEST), 
+		transflag, NULL,
+		single->SetupPacket.bRequest, 
+		single->SetupPacket.wValue, 
+		single->SetupPacket.wIndex, 
+		(PUCHAR)single + single->BufferOffset,
+		NULL, single->BufferLength, NULL);
+	status = SubmitUrbSync(pdx, urb);
+	USBD_UrbFree(pdx->UsbdHandle, urb);
+	return status;
+}
+
+VOID PwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
+{
+	
+	if (IoStatus->Status == STATUS_SUCCESS && MinorFunction == IRP_MN_QUERY_POWER)
+	{
+		NTSTATUS status;
+		KEVENT event;
+		KeInitializeEvent(&event, NotificationEvent, FALSE);
+		status = PoRequestPowerIrp(DeviceObject, IRP_MN_SET_POWER, PowerState, PwrComplete, &event, NULL);
+		if (status == STATUS_PENDING)
+		{
+			KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+		}
+	}
+	PKEVENT event = (PKEVENT)Context;
+	KeSetEvent(event, IO_NO_INCREMENT, FALSE);
+}
+
+NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state)
+{
+	NTSTATUS status;
+	KEVENT event;
+	KeInitializeEvent(&event, NotificationEvent, FALSE);
+	status = PoRequestPowerIrp(pdx->fdo, IRP_MN_QUERY_POWER, state, PwrComplete, &event, NULL);
+	if (status == STATUS_PENDING)
+	{
+		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+	}
+	return STATUS_SUCCESS;
 }

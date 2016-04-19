@@ -1,43 +1,6 @@
 
 #include "usbdriver.h"
 
-//win7及以前的版本使用
-NTSTATUS CallUSBD(IN PDEVICE_EXTENSION pdx, IN PURB urb)
-{
-	PIRP irp;
-	KEVENT event;
-	NTSTATUS ntStatus;
-	IO_STATUS_BLOCK ioStatus;
-	PIO_STACK_LOCATION nextStack;
-
-	KeInitializeEvent(&event, NotificationEvent, FALSE);
-
-	irp = IoBuildDeviceIoControlRequest(IOCTL_INTERNAL_USB_SUBMIT_URB,
-		pdx->NextStackDevice, NULL, 0, NULL, 0, TRUE, &event, &ioStatus);
-
-	if (!irp)
-	{
-		MyDbgPrint(("build irp failed!!!"));
-		return STATUS_INSUFFICIENT_RESOURCES;
-	}
-
-	nextStack = IoGetNextIrpStackLocation(irp);
-	ASSERT(nextStack != NULL);
-	nextStack->Parameters.Others.Argument1 = urb;
-
-	ntStatus = IoCallDriver(pdx->NextStackDevice, irp);
-	if (ntStatus == STATUS_PENDING)
-	{
-		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
-		ntStatus = ioStatus.Status;
-	}
-
-	MyDbgPrint(("leave CallUSBD"));
-	return ntStatus;
-}
-
-
-
 
 
 //同步提交Urb请求的默认完成例程   激活事件
@@ -185,7 +148,7 @@ NTSTATUS SubmitUrbASync(PDEVICE_EXTENSION DeviceExtension,
 		goto Exit;
 	}
 
-	(void)IoCallDriver(DeviceExtension->NextStackDevice, Irp);
+	IoCallDriver(DeviceExtension->NextStackDevice, Irp);
 
 Exit:
 	if (!NT_SUCCESS(ntStatus))

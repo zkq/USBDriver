@@ -3,71 +3,93 @@
 #include "usbdriver.h"
 
 
-NTSTATUS SendNonEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter SendNonEP0Ctl"));
-	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
-	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
-	PVOID sysBuf = pIrp->AssociatedIrp.SystemBuffer;
-	PSINGLE_TRANSFER buf = (PSINGLE_TRANSFER)sysBuf;
-	PCHAR bufFill = (PCHAR)sysBuf + sizeof(SINGLE_TRANSFER);
-	ULONG requireLen = inLen - sizeof(SINGLE_TRANSFER);
-
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-
-	UCHAR endAddress = buf->ucEndpointAddress;
-
-	status = SendNonEP0Data(pdx, endAddress, bufFill, requireLen);
-
-	pIrp->IoStatus.Information = NT_SUCCESS(status) ? inLen : 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
-
-
-
 NTSTATUS SendEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
-
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
 	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
-	PVOID sysBuf = pIrp->AssociatedIrp.SystemBuffer;
-	PSINGLE_TRANSFER buf = (PSINGLE_TRANSFER)sysBuf;
-	PCHAR bufFill = (PCHAR)sysBuf + sizeof(SINGLE_TRANSFER);
-	ULONG requireLen = inLen - sizeof(SINGLE_TRANSFER);
+	PUCHAR sysBuf = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	PSINGLE_TRANSFER single = (PSINGLE_TRANSFER)sysBuf;
+	PUCHAR bufFill = sysBuf + single->BufferOffset;
+	ULONG requireLen = single->BufferLength;
 	ULONG realSize = 0;
 
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	switch (buf->SetupPacket.bRequest){
-		//获取描述符
-	case USB_REQUEST_GET_DESCRIPTOR:
-		switch (buf->SetupPacket.wVal.hiByte){
-			//获取设备描述符
-		case USB_DEVICE_DESCRIPTOR_TYPE:
-			MyDbgPrint((" get device descriptor!!!!"));
-			status = GetDeviceDesc(pdx);
-			if (NT_SUCCESS(status))
-			{
-				realSize = requireLen < sizeof(USB_DEVICE_DESCRIPTOR) ? requireLen : sizeof(USB_DEVICE_DESCRIPTOR);
-				RtlCopyMemory(bufFill, pdx->deviceDesc, realSize);
+	if (single->SetupPacket.bmReqType.Type == BMREQUEST_STANDARD)
+	{
+		switch (single->SetupPacket.bRequest){
+			//获取设备状态
+		case USB_REQUEST_GET_STATUS:
+			status = GetStatus(pdx, (PUSHORT)bufFill, single->SetupPacket.bmReqType.Recipient, single->SetupPacket.wIndex);
+			break;
+			//清除特征
+		case USB_REQUEST_CLEAR_FEATURE:
+			status = Feature(pdx, TRUE, single->SetupPacket.bmReqType.Recipient, single->SetupPacket.wValue, single->SetupPacket.wIndex);
+			break;
+			//设置特征
+		case USB_REQUEST_SET_FEATURE:
+			status = Feature(pdx, FALSE, single->SetupPacket.bmReqType.Recipient, single->SetupPacket.wValue, single->SetupPacket.wIndex);
+			break;
+			//设置地址
+		case USB_REQUEST_SET_ADDRESS:
+			MyDbgPrint((" set address!!!!"));
+			status = SetAddress(pdx, single->SetupPacket.wValue);
+			break;
+			//获取描述符
+		case USB_REQUEST_GET_DESCRIPTOR:
+			switch (single->SetupPacket.wVal.hiByte){
+				//获取设备描述符
+			case USB_DEVICE_DESCRIPTOR_TYPE:
+				MyDbgPrint((" get device descriptor!!!!"));
+				status = GetDeviceDesc(pdx);
+				if (NT_SUCCESS(status))
+				{
+					realSize = requireLen < sizeof(USB_DEVICE_DESCRIPTOR) ? requireLen : sizeof(USB_DEVICE_DESCRIPTOR);
+					RtlCopyMemory(bufFill, pdx->deviceDesc, realSize);
+				}
+				break;
+			case USB_CONFIGURATION_DESCRIPTOR_TYPE:
+				MyDbgPrint((" get configuration descriptor!!!!"));
+				status = GetConfDesc(pdx);
+				if (NT_SUCCESS(status))
+				{
+					realSize = requireLen < pdx->confDesc->wTotalLength ? requireLen : pdx->confDesc->wTotalLength;
+					RtlCopyMemory(bufFill, pdx->confDesc, realSize);
+				}
+				break;
 			}
 			break;
-		case USB_CONFIGURATION_DESCRIPTOR_TYPE:
-			MyDbgPrint((" get configuration descriptor!!!!"));
-			status = GetConfDesc(pdx);
-			if (NT_SUCCESS(status))
-			{
-				realSize = requireLen < pdx->confDesc->wTotalLength ? requireLen : pdx->confDesc->wTotalLength;
-				RtlCopyMemory(bufFill, pdx->confDesc, realSize);
-			}
+			//设置描述符
+		case USB_REQUEST_SET_DESCRIPTOR:
+			MyDbgPrint((" set descriptor!!!!"));
+			status = STATUS_INVALID_DEVICE_REQUEST;
+			break;
+			//获取配置
+		case USB_REQUEST_GET_CONFIGURATION:
+			MyDbgPrint((" get config!!!!"));
+			status = GetConfiguration(pdx, bufFill);
+			break;
+			//设置配置
+		case USB_REQUEST_SET_CONFIGURATION:
+			MyDbgPrint((" set config!!!!"));
+			status = SelectConfiguration(pdx);
+			break;
+			//获取接口号
+		case USB_REQUEST_GET_INTERFACE:
+			MyDbgPrint(("get interface!!!!"));
+			status = GetInterface(pdx, bufFill);
+			break;
+			//设置接口
+		case USB_REQUEST_SET_INTERFACE:
+			MyDbgPrint(("set interface!!!!"));
+			UCHAR altNum = single->SetupPacket.wValue;
+			status = SelectInterface(pdx, altNum);
 			break;
 		}
-		break;
-	case USB_REQUEST_SET_CONFIGURATION:
-		MyDbgPrint((" set config!!!!"));
-		status = SelectConfiguration(pdx);
-		break;
+	}
+	else if (single->SetupPacket.bmReqType.Type == BMREQUEST_VENDOR)
+	{
+		MyDbgPrint(("vendor request!!!!"));
+		status = VendorRequest(pdx, single);
 	}
 
 	pIrp->IoStatus.Information = NT_SUCCESS(status) ? realSize + sizeof(SINGLE_TRANSFER) : 0;
@@ -75,6 +97,68 @@ NTSTATUS SendEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
+
+
+
+NTSTATUS SendNonEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter SendNonEP0Ctl"));
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
+	PUCHAR sysBuf = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	PSINGLE_TRANSFER single = (PSINGLE_TRANSFER)sysBuf;
+	PUCHAR bufFill = sysBuf + single->BufferOffset;
+	ULONG requireLen = single->BufferLength;
+
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+	UCHAR endAddress = single->ucEndpointAddress;
+
+	status = SendNonEP0CtlData(pdx, endAddress, 
+		sysBuf + single->IsoPacketOffset, single->IsoPacketLength,
+		bufFill, requireLen);
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? inLen : 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+
+}
+
+
+NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter SendNonEP0Direct"));
+
+	KIRQL irql;
+	IoAcquireCancelSpinLock(&irql);
+	PLIST_ENTRY entry = &pdx->fdo->DeviceQueue.DeviceListHead;
+	PLIST_ENTRY temp = entry;
+	UCHAR num = 0;
+	while (temp->Flink != entry)
+	{
+		num++;
+		temp = temp->Flink;
+	}
+	IoReleaseCancelSpinLock(irql);
+
+
+	if (num <= 5)
+	{
+		IoMarkIrpPending(pIrp);
+		IoStartPacket(pdx->fdo, pIrp, 0, OnCancelIrp);
+		return STATUS_PENDING;
+	}
+	else{
+		MyDbgPrint(("too much request!!!"));
+		pIrp->IoStatus.Information = 0;
+		pIrp->IoStatus.Status = STATUS_UNSUCCESSFUL;
+		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+		return STATUS_UNSUCCESSFUL;
+	}
+	
+}
+
 
 NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
@@ -86,26 +170,21 @@ NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	return status;
 }
 
+
 NTSTATUS GetUsbDIVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter GetUSBDIVersion"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	NTSTATUS status = STATUS_SUCCESS;
 
-	PIRP Irp = IoAllocateIrp((pdx->NextStackDevice->StackSize) + 1, TRUE);
-	if (!Irp)
-	{
-		//Irp could not be allocated.
-		return STATUS_INSUFFICIENT_RESOURCES;
-	}
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	PULONG version = (PULONG)pIrp->AssociatedIrp.SystemBuffer;
+	
+	PUSBD_VERSION_INFORMATION info = (PUSBD_VERSION_INFORMATION)ExAllocatePool(NonPagedPool, sizeof(USBD_VERSION_INFORMATION));
+	//USBD_GetUSBDIVersion(info);
+	*version = info->USBDI_Version;
+	ExFreePool(info);
 
-	PIO_STACK_LOCATION nextStack;
-
-	// Get the next stack location.
-	nextStack = IoGetNextIrpStackLocation(Irp);
-
-	// Set the major code.
-	nextStack->MajorFunction = IRP_MJ_INTERNAL_DEVICE_CONTROL;
-	pIrp->IoStatus.Information = 0;
+	pIrp->IoStatus.Information = sizeof(ULONG);
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
@@ -119,22 +198,19 @@ NTSTATUS GetAltIntSetting(PDEVICE_EXTENSION pdx, PIRP pIrp)
 
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
 	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
-	ULONG ouLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
 	PVOID sysBuf = pIrp->AssociatedIrp.SystemBuffer;
-	PCHAR bufFill = (PCHAR)sysBuf;
+	PUCHAR bufFill = (PUCHAR)sysBuf;
 
 	MyDbgPrint(("GetAltIntSetting"));
-
-	//URB urb;
-	//UsbBuildGetDescriptorRequest(&urb, sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST),
-	//	USB_DEVICE_DESCRIPTOR_TYPE, 0, 0, bufFill, NULL, sizeof(USB_DEVICE_DESCRIPTOR), NULL);
-	//status = SubmitUrbSync(pdx, &urb, UrbCompletionRoutine);
+	
+	status = GetInterface(pdx, bufFill);
 
 	pIrp->IoStatus.Information = NT_SUCCESS(status) ? inLen : 0;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
+
 
 NTSTATUS SelIntface(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
@@ -155,6 +231,12 @@ NTSTATUS SelIntface(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
+
+
+
+
+
+
 
 NTSTATUS GetAddress(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
@@ -188,18 +270,27 @@ NTSTATUS GetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	return status;
 
 }
+
+
 NTSTATUS SetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter SetPwrState"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
+
+	//PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+
+	PUCHAR sysBuf = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	POWER_STATE state;
+	state.DeviceState = (DEVICE_POWER_STATE)sysBuf[0];
+
+	NTSTATUS status = SetPwr(pdx, state);
+	pIrp->IoStatus.Information = 1;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
 
 
-//重新连接USB设备  模拟物理
+//重新连接USB设备  模拟物理  
 NTSTATUS CyclePort(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter CyclePort"));
@@ -247,6 +338,7 @@ NTSTATUS GetTransSize(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	return status;
 }
 
+
 NTSTATUS SetTransSize(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter SetTransSize"));
@@ -283,17 +375,6 @@ NTSTATUS GetFriendlyName(PDEVICE_EXTENSION pdx, PIRP pIrp)
 NTSTATUS AbortPipe(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter AbortPipe"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
-
-
-NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter SendNonEP0Direct"));
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	pIrp->IoStatus.Information = 0;
 	pIrp->IoStatus.Status = status;

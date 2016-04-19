@@ -81,10 +81,49 @@ VOID StartIO(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
 		IoReleaseCancelSpinLock(oldIrql);
 	}
 
-	pIrp->IoStatus.Status = STATUS_SUCCESS;
-	pIrp->IoStatus.Information = 0;
+	//处理队列的IRP   这里irp仅仅来自非控制端点。
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	PUCHAR userInputBuf = (PUCHAR)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+	PVOID userOutputBuf = pIrp->UserBuffer;
+	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
+	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 
+	MyDbgPrint(("userinputbuf:0X%0X", userInputBuf));
+	MyDbgPrint(("useroutputbuf:0X%0X", userOutputBuf));
+	//测试地址是否可读写
+	__try
+	{
+		MyDbgPrint(("enter try block"));
+		ProbeForRead(userInputBuf, inLen, sizeof(UCHAR));
+		ProbeForWrite(userOutputBuf, outLen, sizeof(UCHAR));
+
+		PSINGLE_TRANSFER singleTrans = (PSINGLE_TRANSFER)userInputBuf;
+		UCHAR endAddress = singleTrans->ucEndpointAddress;
+		ULONG isoPacketLen = singleTrans->IsoPacketLength;
+		PUCHAR isoInfoBuf = userInputBuf + singleTrans->IsoPacketOffset;
+
+		PVOID kernlBuf = ExAllocatePool(NonPagedPool, outLen);
+		RtlCopyMemory(kernlBuf, userOutputBuf, outLen);
+		status = SendNonEP0CtlData((PDEVICE_EXTENSION)pDev->DeviceExtension, endAddress, 
+			isoInfoBuf, isoPacketLen, 
+			kernlBuf, outLen);
+		if (NT_SUCCESS(status))
+		{
+			MyDbgPrint(("direct ctl success!!!"))
+			RtlCopyMemory(userOutputBuf, kernlBuf, outLen);
+		}
+		ExFreePool(kernlBuf);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		MyDbgPrint(("catch exception"));
+	}
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? outLen : 0;
+	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
 	IoStartNextPacket(pDev, TRUE);
 	MyDbgPrint(("leave startio true"));
 }
@@ -208,7 +247,7 @@ NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 	static NTSTATUS(*fcntab[NUMBER_OF_ADAPT_IOCTLS])(PDEVICE_EXTENSION pdx, PIRP pIrp) =
 	{
 		 GetDriverVersion,
-		 GetUSBDIVersion,
+		 GetUsbDIVersion,
 		 GetAltIntSetting,
 		 SelIntface,
 		 GetAddress,
@@ -236,7 +275,7 @@ NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	for (ULONG i = 0; i < NUMBER_OF_ADAPT_IOCTLS; i++)
 	{
-		if (CTL_CODE(FILE_DEVICE_UNKNOWN, i, METHOD_BUFFERED, FILE_ANY_ACCESS) == code)
+		if (CTL_CODE(FILE_DEVICE_UNKNOWN, IOCTL_ADAPT_INDEX + i, METHOD_BUFFERED, FILE_ANY_ACCESS) == code)
 		{
 			status = fcntab[i](pdx, pIrp);
 			break;
@@ -245,17 +284,22 @@ NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 
 	if (i == NUMBER_OF_ADAPT_IOCTLS)
 	{
-		MyDbgPrint(("didnot match method"));
-		pIrp->IoStatus.Information = 0;
-		pIrp->IoStatus.Status = status;
-		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-		return  status;
+		//直接内存模式读写
+		if (CTL_CODE(FILE_DEVICE_UNKNOWN, IOCTL_ADAPT_INDEX + 18, METHOD_NEITHER, FILE_ANY_ACCESS) == code)
+		{
+			status = SendNonEP0Direct(pdx, pIrp);
+		}
+		else{
+			MyDbgPrint(("didnot match method"));
+			pIrp->IoStatus.Information = 0;
+			pIrp->IoStatus.Status = status;
+			IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+			return  status;
+		}
 	}
 	MyDbgPrint((" Leave deviceIOControl**************"));
 	return status;
 }
-
-
 
 #pragma PAGEDCODE
 NTSTATUS DispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
@@ -281,7 +325,7 @@ void Unload(IN PDRIVER_OBJECT pDriverObject)
 	MyDbgPrint((" Leave unLoad**************"));
 }
 
-VOID CancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
+VOID OnCancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
 {
 	MyDbgPrint(("enter cancelirp"));
 	MyDbgPrint(("%s", KeGetCurrentIrql()));
@@ -289,19 +333,20 @@ VOID CancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
 	//当前irp已经出队列，准备由startio处理
 	if (pIrp == pDev->CurrentIrp)
 	{
-
-		pIrp->Cancel = true;
+		KIRQL oldirql = pIrp->CancelIrql;
+		//pIrp->Cancel = true;
 		IoReleaseCancelSpinLock(pIrp->CancelIrql);
 		IoStartNextPacket(pDev, TRUE);
 		MyDbgPrint(("%s", KeGetCurrentIrql()));
-		//KeLowerIrql()
+		KeLowerIrql(oldirql);
 	}
 	else
 	{
 		KeRemoveEntryDeviceQueue(&pDev->DeviceQueue, &pIrp->Tail.Overlay.DeviceQueueEntry);
 		IoReleaseCancelSpinLock(pIrp->CancelIrql);
 	}
-
+	KIRQL irql;
+	IoAcquireCancelSpinLock(&irql);
 	pIrp->IoStatus.Status = STATUS_CANCELLED;
 	pIrp->IoStatus.Information = 0;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);

@@ -149,7 +149,9 @@ NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	PAGED_CODE();
 	pIrp->IoStatus.Status = STATUS_SUCCESS;
 	NTSTATUS status = DefaultPnpHandler(pdx, pIrp);
-	IoDeleteSymbolicLink(&pdx->ustrSymbolicName);
+
+	IoSetDeviceInterfaceState(&pdx->ustrSymbolicName, FALSE);
+	RtlFreeUnicodeString(&pdx->ustrSymbolicName);
 
 	if (pdx->NextStackDevice)
 		IoDetachDevice(pdx->NextStackDevice);

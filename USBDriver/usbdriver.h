@@ -71,7 +71,7 @@ VOID StartIO(IN PDEVICE_OBJECT pDev, IN PIRP pIrp);
 //通过IoSetCancelRoutine将此例程和一个Irp关联。
 //调用IoCabcelIrp时，会调用Irp的CancelIrp例程。
 //当文件句柄关闭时，会枚举所有挂起的Irp，并调用其CancelIrp例程。
-VOID CancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp);
+VOID OnCancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp);
 
 NTSTATUS AddDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject);
 
@@ -87,27 +87,26 @@ NTSTATUS DispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 
 
-//NTSTATUS CallUSBD(IN PDEVICE_EXTENSION pdx, IN PURB urb);
-NTSTATUS UrbCompletionRoutine(PDEVICE_OBJECT DeviceObject,
-	PIRP           Irp,
-	PVOID          Context);
-NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension,
-	PURB Urb,
-	BOOLEAN IsUrbBuildByNewMethod = true,
-	PIO_COMPLETION_ROUTINE SyncCompletionRoutine = UrbCompletionRoutine);
-NTSTATUS SubmitUrbASync(PDEVICE_EXTENSION DeviceExtension,
-	PIRP Irp,
-	PURB Urb,
-	PIO_COMPLETION_ROUTINE CompletionRoutine,
-	PVOID CompletionContext);
-NTSTATUS SubmitCTLSync(PDEVICE_OBJECT DeviceObject, );
+NTSTATUS UrbCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
+NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension, PURB Urb, BOOLEAN IsUrbBuildByNewMethod = true, PIO_COMPLETION_ROUTINE SyncCompletionRoutine = UrbCompletionRoutine);
+NTSTATUS SubmitUrbASync(PDEVICE_EXTENSION DeviceExtension, PIRP Irp, PURB Urb, PIO_COMPLETION_ROUTINE CompletionRoutine, PVOID CompletionContext);
 
 //IOCTRL helper function
+NTSTATUS GetStatus(PDEVICE_EXTENSION pdx, PUSHORT status, UCHAR target, UCHAR index);
+NTSTATUS Feature(PDEVICE_EXTENSION pdx, BOOLEAN bset, UCHAR target, USHORT selector, UCHAR index);
+NTSTATUS SetAddress(PDEVICE_EXTENSION pdx, UCHAR address);
 NTSTATUS GetDeviceDesc(PDEVICE_EXTENSION pdx, bool refresh = false);
 NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh = false);
 NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx);
 NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum);
-NTSTATUS SendNonEP0Data(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID buffer, ULONG bufLen);
+NTSTATUS GetConfiguration(PDEVICE_EXTENSION pdx, PUCHAR confNum);
+NTSTATUS GetInterface(PDEVICE_EXTENSION pdx, PUCHAR intfNum);
+NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen);
+NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single);
+NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state);
+
+
+
 //IO CTL Methods
 NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp);
 NTSTATUS GetUsbDIVersion(PDEVICE_EXTENSION pdx, PIRP pIrp);
