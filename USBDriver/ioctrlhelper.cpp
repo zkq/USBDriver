@@ -667,8 +667,6 @@ NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInf
 	{
 		TransferFlags = USBD_TRANSFER_DIRECTION_IN | USBD_SHORT_TRANSFER_OK;
 	}
-
-
 	if (isoLen)
 	{
 		status = USBD_IsochUrbAllocate(pdx->UsbdHandle, isoLen / sizeof(ISO_PACKET_INFO), &urb);
@@ -706,14 +704,11 @@ NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInf
 		}
 	}
 
-
 Exit:
-
 	if (urb)
 	{
 		USBD_UrbFree(pdx->UsbdHandle, urb);
 	}
-
 	return status;
 }
 
@@ -742,6 +737,7 @@ NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single)
 	return status;
 }
 
+
 VOID PwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
 {
 	
@@ -759,6 +755,7 @@ VOID PwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE P
 	PKEVENT event = (PKEVENT)Context;
 	KeSetEvent(event, IO_NO_INCREMENT, FALSE);
 }
+
 
 NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state)
 {

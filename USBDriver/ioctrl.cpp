@@ -130,33 +130,49 @@ NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter SendNonEP0Direct"));
 
-	KIRQL irql;
-	IoAcquireCancelSpinLock(&irql);
-	PLIST_ENTRY entry = &pdx->fdo->DeviceQueue.DeviceListHead;
-	PLIST_ENTRY temp = entry;
-	UCHAR num = 0;
-	while (temp->Flink != entry)
-	{
-		num++;
-		temp = temp->Flink;
-	}
-	IoReleaseCancelSpinLock(irql);
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	PUCHAR userInputBuf = (PUCHAR)stack->Parameters.DeviceIoControl.Type3InputBuffer;
+	PVOID userOutputBuf = pIrp->UserBuffer;
+	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
+	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 
-
-	if (num <= 5)
+	MyDbgPrint(("userinputbuf:0X%0X", userInputBuf));
+	MyDbgPrint(("useroutputbuf:0X%0X", userOutputBuf));
+	//²âÊÔµØÖ·ÊÇ·ñ¿É¶ÁÐ´
+	__try
 	{
-		IoMarkIrpPending(pIrp);
-		IoStartPacket(pdx->fdo, pIrp, 0, OnCancelIrp);
-		return STATUS_PENDING;
+		MyDbgPrint(("enter try block"));
+		ProbeForRead(userInputBuf, inLen, sizeof(UCHAR));
+		ProbeForWrite(userOutputBuf, outLen, sizeof(UCHAR));
+
+		PSINGLE_TRANSFER singleTrans = (PSINGLE_TRANSFER)userInputBuf;
+		UCHAR endAddress = singleTrans->ucEndpointAddress;
+		ULONG isoPacketLen = singleTrans->IsoPacketLength;
+		PUCHAR isoInfoBuf = userInputBuf + singleTrans->IsoPacketOffset;
+
+		PVOID kernlBuf = ExAllocatePool(NonPagedPool, outLen);
+		RtlCopyMemory(kernlBuf, userOutputBuf, outLen);
+		status = SendNonEP0CtlData(pdx, endAddress,
+			isoInfoBuf, isoPacketLen,
+			kernlBuf, outLen);
+		if (NT_SUCCESS(status))
+		{
+			MyDbgPrint(("direct ctl success!!!"))
+				RtlCopyMemory(userOutputBuf, kernlBuf, outLen);
+		}
+		ExFreePool(kernlBuf);
 	}
-	else{
-		MyDbgPrint(("too much request!!!"));
-		pIrp->IoStatus.Information = 0;
-		pIrp->IoStatus.Status = STATUS_UNSUCCESSFUL;
-		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-		return STATUS_UNSUCCESSFUL;
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		MyDbgPrint(("catch exception"));
 	}
-	
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? outLen : 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+
+	return status;
 }
 
 
@@ -231,10 +247,6 @@ NTSTATUS SelIntface(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
-
-
-
-
 
 
 

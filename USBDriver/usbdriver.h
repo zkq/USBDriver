@@ -65,8 +65,6 @@ extern GUID guid;
 extern "C"
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegistryPath);
 
-//StartIO 用于串行处理IO请求
-VOID StartIO(IN PDEVICE_OBJECT pDev, IN PIRP pIrp);
 //******************取消的IRP*********************************
 //通过IoSetCancelRoutine将此例程和一个Irp关联。
 //调用IoCabcelIrp时，会调用Irp的CancelIrp例程。

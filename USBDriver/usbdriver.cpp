@@ -36,98 +36,12 @@ NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING /*pRegi
 	//writefile
 	pDriverObject->MajorFunction[IRP_MJ_WRITE] = DispatchRoutine;
 
-
 	pDriverObject->DriverUnload = Unload;
-
-	pDriverObject->DeviceObject;
-	pDriverObject->DriverExtension->AddDevice;
-	pDriverObject->DriverExtension->Count;
-	pDriverObject->DriverExtension->DriverObject;
-	pDriverObject->DriverExtension->ServiceKeyName;
-	pDriverObject->DriverInit;
-	pDriverObject->DriverName;
-	pDriverObject->DriverSection;
-	pDriverObject->DriverSize;
-	pDriverObject->DriverStart;
-	pDriverObject->DriverStartIo = StartIO;
-	pDriverObject->DriverUnload;
-	pDriverObject->FastIoDispatch;
-	pDriverObject->Flags;
-	pDriverObject->HardwareDatabase;
-	pDriverObject->MajorFunction;
-	pDriverObject->Size;
-	pDriverObject->Type;
 
 
 	MyDbgPrint((" Leave DriverEntry**************\n"));
 	return STATUS_SUCCESS;
 }
-
-#pragma LOCKEDCODE
-VOID StartIO(IN PDEVICE_OBJECT pDev, IN PIRP pIrp)
-{
-	MyDbgPrint(("enter startio***********"));
-
-	KIRQL oldIrql;
-	IoAcquireCancelSpinLock(&oldIrql);
-	if (pIrp != pDev->CurrentIrp || pIrp->Cancel)
-	{
-		IoReleaseCancelSpinLock(oldIrql);
-		MyDbgPrint(("leave startio false"));
-		return;
-	}
-	else{
-		IoSetCancelRoutine(pIrp, NULL);
-		IoReleaseCancelSpinLock(oldIrql);
-	}
-
-	//处理队列的IRP   这里irp仅仅来自非控制端点。
-	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
-	PUCHAR userInputBuf = (PUCHAR)stack->Parameters.DeviceIoControl.Type3InputBuffer;
-	PVOID userOutputBuf = pIrp->UserBuffer;
-	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
-	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-
-	MyDbgPrint(("userinputbuf:0X%0X", userInputBuf));
-	MyDbgPrint(("useroutputbuf:0X%0X", userOutputBuf));
-	//测试地址是否可读写
-	__try
-	{
-		MyDbgPrint(("enter try block"));
-		ProbeForRead(userInputBuf, inLen, sizeof(UCHAR));
-		ProbeForWrite(userOutputBuf, outLen, sizeof(UCHAR));
-
-		PSINGLE_TRANSFER singleTrans = (PSINGLE_TRANSFER)userInputBuf;
-		UCHAR endAddress = singleTrans->ucEndpointAddress;
-		ULONG isoPacketLen = singleTrans->IsoPacketLength;
-		PUCHAR isoInfoBuf = userInputBuf + singleTrans->IsoPacketOffset;
-
-		PVOID kernlBuf = ExAllocatePool(NonPagedPool, outLen);
-		RtlCopyMemory(kernlBuf, userOutputBuf, outLen);
-		status = SendNonEP0CtlData((PDEVICE_EXTENSION)pDev->DeviceExtension, endAddress, 
-			isoInfoBuf, isoPacketLen, 
-			kernlBuf, outLen);
-		if (NT_SUCCESS(status))
-		{
-			MyDbgPrint(("direct ctl success!!!"))
-			RtlCopyMemory(userOutputBuf, kernlBuf, outLen);
-		}
-		ExFreePool(kernlBuf);
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		MyDbgPrint(("catch exception"));
-	}
-
-	pIrp->IoStatus.Information = NT_SUCCESS(status) ? outLen : 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-
-	IoStartNextPacket(pDev, TRUE);
-	MyDbgPrint(("leave startio true"));
-}
-
 
 #pragma PAGEDCODE
 NTSTATUS AddDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject)
