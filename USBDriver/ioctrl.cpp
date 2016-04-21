@@ -103,24 +103,17 @@ NTSTATUS SendEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
 NTSTATUS SendNonEP0Ctl(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter SendNonEP0Ctl"));
-	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
-	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
 	PUCHAR sysBuf = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
 	PSINGLE_TRANSFER single = (PSINGLE_TRANSFER)sysBuf;
-	PUCHAR bufFill = sysBuf + single->BufferOffset;
-	ULONG requireLen = single->BufferLength;
 
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 
 	UCHAR endAddress = single->ucEndpointAddress;
 
-	status = SendNonEP0CtlData(pdx, endAddress, 
+	status = SendNonEP0CtlData(pdx, pIrp, endAddress, 
 		sysBuf + single->IsoPacketOffset, single->IsoPacketLength,
-		bufFill, requireLen);
+		sysBuf + single->BufferOffset, single->BufferLength);
 
-	pIrp->IoStatus.Information = NT_SUCCESS(status) ? inLen : 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 
 }
@@ -135,7 +128,7 @@ NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	PVOID userOutputBuf = pIrp->UserBuffer;
 	ULONG inLen = stack->Parameters.DeviceIoControl.InputBufferLength;
 	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	NTSTATUS status = -1;
 
 	MyDbgPrint(("userinputbuf:0X%0X", userInputBuf));
 	MyDbgPrint(("useroutputbuf:0X%0X", userOutputBuf));
@@ -150,28 +143,29 @@ NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
 		UCHAR endAddress = singleTrans->ucEndpointAddress;
 		ULONG isoPacketLen = singleTrans->IsoPacketLength;
 		PUCHAR isoInfoBuf = userInputBuf + singleTrans->IsoPacketOffset;
+		PVOID kernelBuf = ExAllocatePool(NonPagedPool, outLen);
 
-		PVOID kernlBuf = ExAllocatePool(NonPagedPool, outLen);
-		RtlCopyMemory(kernlBuf, userOutputBuf, outLen);
-		status = SendNonEP0CtlData(pdx, endAddress,
+		if (USB_ENDPOINT_DIRECTION_OUT(endAddress))
+			RtlCopyMemory(kernelBuf, userOutputBuf, outLen);
+		status = SendNonEP0CtlData(pdx, NULL, endAddress,
 			isoInfoBuf, isoPacketLen,
-			kernlBuf, outLen);
-		if (NT_SUCCESS(status))
+			kernelBuf, outLen);
+
+		if (NT_SUCCESS(status) && USB_ENDPOINT_DIRECTION_IN(endAddress))
 		{
-			MyDbgPrint(("direct ctl success!!!"))
-				RtlCopyMemory(userOutputBuf, kernlBuf, outLen);
+			RtlCopyMemory(userOutputBuf, kernelBuf, outLen);
 		}
-		ExFreePool(kernlBuf);
+		ExFreePool(kernelBuf);
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		MyDbgPrint(("catch exception"));
 	}
 
-	pIrp->IoStatus.Information = NT_SUCCESS(status) ? outLen : 0;
+	MyDbgPrint(("status:%d", status));
 	pIrp->IoStatus.Status = status;
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? outLen : 0;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-
 	return status;
 }
 

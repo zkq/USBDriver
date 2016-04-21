@@ -4,12 +4,11 @@
 
 
 //同步提交Urb请求的默认完成例程   激活事件
-NTSTATUS UrbCompletionRoutine(PDEVICE_OBJECT /*DeviceObject*/,
+NTSTATUS UrbSyncCompletionRoutine(PDEVICE_OBJECT /*DeviceObject*/,
 	PIRP           Irp,
 	PVOID          Context)
 {
 	PKEVENT kevent;
-
 	kevent = (PKEVENT)Context;
 
 	if (Irp->PendingReturned == TRUE)
@@ -17,13 +16,10 @@ NTSTATUS UrbCompletionRoutine(PDEVICE_OBJECT /*DeviceObject*/,
 		KeSetEvent(kevent, IO_NO_INCREMENT, FALSE);
 	}
 
-	KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "Select-configuration request completed. \n"));
-
-
 	return STATUS_MORE_PROCESSING_REQUIRED;
 }
 
-//win8及以后的版本使用     同步提交Urb请求到总线驱动
+//同步提交Urb请求到总线驱动
 NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension,
 	PURB Urb,
 	BOOLEAN IsUrbBuildByNewMethod,
@@ -32,31 +28,16 @@ NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension,
 
 	NTSTATUS  ntStatus;
 	KEVENT    kEvent;
-	// Allocate the IRP to send the buffer down the USB stack.
-	// The IRP will be freed by IO manager.
 
 	PIRP Irp = IoAllocateIrp((DeviceExtension->NextStackDevice->StackSize) + 1, TRUE);
-
 	if (!Irp)
 	{
-		//Irp could not be allocated.
 		return STATUS_INSUFFICIENT_RESOURCES;
 	}
-
-	PIO_STACK_LOCATION nextStack;
-
-	// Get the next stack location.
-	nextStack = IoGetNextIrpStackLocation(Irp);
-
-	// Set the major code.
+	PIO_STACK_LOCATION nextStack = IoGetNextIrpStackLocation(Irp);
 	nextStack->MajorFunction = IRP_MJ_INTERNAL_DEVICE_CONTROL;
-
-	// Set the IOCTL code for URB submission.
 	nextStack->Parameters.DeviceIoControl.IoControlCode = IOCTL_INTERNAL_USB_SUBMIT_URB;
 
-	// Attach the URB to this IRP.
-	// The URB must be allocated by USBD_UrbAllocate, USBD_IsochUrbAllocate, 
-	// USBD_SelectConfigUrbAllocateAndBuild, or USBD_SelectInterfaceUrbAllocateAndBuild.
 	if (IsUrbBuildByNewMethod)
 	{
 		USBD_AssignUrbToIoStackLocation(DeviceExtension->UsbdHandle, nextStack, Urb);
@@ -64,9 +45,8 @@ NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension,
 	else{
 		nextStack->Parameters.Others.Argument1 = Urb;
 	}
-	
-	KeInitializeEvent(&kEvent, NotificationEvent, FALSE);
 
+	KeInitializeEvent(&kEvent, NotificationEvent, FALSE);
 	ntStatus = IoSetCompletionRoutineEx(DeviceExtension->NextStackDevice,
 		Irp,
 		SyncCompletionRoutine,
@@ -77,89 +57,84 @@ NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension,
 
 	if (!NT_SUCCESS(ntStatus))
 	{
-		KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "IoSetCompletionRoutineEx failed. \n"));
 		goto Exit;
 	}
 
 	ntStatus = IoCallDriver(DeviceExtension->NextStackDevice, Irp);
-
 	if (ntStatus == STATUS_PENDING)
 	{
-		KeWaitForSingleObject(&kEvent,
-			Executive,
-			KernelMode,
-			FALSE,
-			NULL);
+		KeWaitForSingleObject(&kEvent, Executive, KernelMode, FALSE, NULL);
 	}
-
 	ntStatus = Irp->IoStatus.Status;
 
 Exit:
-
 	if (!NT_SUCCESS(ntStatus))
 	{
-		// We hit a failure condition, 
-		// We will free the IRP
-
 		IoFreeIrp(Irp);
 		Irp = NULL;
 	}
-
-
 	return ntStatus;
 }
 
 
-//win8及以后的版本使用     异步提交Urb请求到总线驱动
-NTSTATUS SubmitUrbASync(PDEVICE_EXTENSION DeviceExtension,
+
+//异步提交Urb请求的完成例程   复制内存
+NTSTATUS UrbAsyncSyncCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context)
+{
+	if (Irp->PendingReturned == TRUE)
+	{
+		IoMarkIrpPending(Irp);
+	}
+
+	MyDbgPrint(("enter urbcomp!!!!!!!!!!!!!status:%d", Irp->IoStatus.Status));
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
+	ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+	if (NT_SUCCESS(Irp->IoStatus.Status))
+		Irp->IoStatus.Information = outLen;
+
+	return STATUS_SUCCESS;
+}
+
+
+//异步提交Urb请求到总线驱动
+NTSTATUS SubmitUrbAsync(PDEVICE_EXTENSION DeviceExtension,
 	PIRP Irp,
 	PURB Urb,
-	PIO_COMPLETION_ROUTINE CompletionRoutine,
-	PVOID CompletionContext)
+	BOOLEAN IsUrbBuildByNewMethod,
+	PIO_COMPLETION_ROUTINE CompletionRoutine)
 {
-	// Completion routine is required if the URB is submitted asynchronously.
-	// The caller's completion routine releases the IRP when it completes.
-
-
+	MyDbgPrint(("enter suburbAsync"));
 	NTSTATUS ntStatus = -1;
 
+	IoCopyCurrentIrpStackLocationToNext(Irp);
 	PIO_STACK_LOCATION nextStack = IoGetNextIrpStackLocation(Irp);
-
-	// Attach the URB to this IRP.
 	nextStack->MajorFunction = IRP_MJ_INTERNAL_DEVICE_CONTROL;
-
-	// Attach the URB to this IRP.
 	nextStack->Parameters.DeviceIoControl.IoControlCode = IOCTL_INTERNAL_USB_SUBMIT_URB;
-
-	// Attach the URB to this IRP.
-	(void)USBD_AssignUrbToIoStackLocation(DeviceExtension->UsbdHandle, nextStack, Urb);
+	if (IsUrbBuildByNewMethod)
+	{
+		USBD_AssignUrbToIoStackLocation(DeviceExtension->UsbdHandle, nextStack, Urb);
+	}
+	else{
+		nextStack->Parameters.Others.Argument1 = Urb;
+	}
 
 	// Caller's completion routine will free the irp when it completes.
 	ntStatus = IoSetCompletionRoutineEx(DeviceExtension->NextStackDevice,
 		Irp,
 		CompletionRoutine,
-		CompletionContext,
+		NULL,
 		TRUE,
 		TRUE,
 		TRUE);
 
 	if (!NT_SUCCESS(ntStatus))
 	{
-		goto Exit;
+		return ntStatus;
 	}
 
-	IoCallDriver(DeviceExtension->NextStackDevice, Irp);
+	ntStatus = IoCallDriver(DeviceExtension->NextStackDevice, Irp);
 
-Exit:
-	if (!NT_SUCCESS(ntStatus))
-	{
-		// We hit a failure condition, 
-		// We will free the IRP
-
-		IoFreeIrp(Irp);
-		Irp = NULL;
-	}
-
+	MyDbgPrint(("ntstatus:%d", ntStatus));
 	return ntStatus;
 }
 

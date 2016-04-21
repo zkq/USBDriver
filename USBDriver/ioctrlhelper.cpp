@@ -640,12 +640,12 @@ Exit:
 }
 
 
-NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen)
+NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, PIRP pIrp, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen)
 {
 	PURB urb = NULL;
 	NTSTATUS  status;
 	
-	//look for  pipe handle
+	//构造URB
 	USBD_PIPE_HANDLE handle = 0;
 	for (UCHAR i = 0; i < pdx->pipeCount; i++)
 	{
@@ -661,7 +661,7 @@ NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInf
 		goto Exit;
 	}
 
-	//determin flag
+
 	ULONG TransferFlags = 0;
 	if (USB_ENDPOINT_DIRECTION_IN(endAddress))
 	{
@@ -686,24 +686,30 @@ NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInf
 		UsbBuildInterruptOrBulkTransferRequest(urb, sizeof(_URB_BULK_OR_INTERRUPT_TRANSFER), handle, buffer, NULL, bufLen, TransferFlags, NULL);
 	}
 
-	status = SubmitUrbSync(pdx, urb);
 
-	if (!NT_SUCCESS(status))
+	//提交URB
+	if (pIrp)
 	{
-		MyDbgPrint(("SendNonEP0Data failed"));
-		goto Exit;
+		return SubmitUrbAsync(pdx, pIrp, urb);
 	}
-
-	if (isoLen)
-	{
-		for (int i = 0; i < urb->UrbIsochronousTransfer.NumberOfPackets; i++)
+	else{
+		status = SubmitUrbSync(pdx, urb);
+		if (!NT_SUCCESS(status))
 		{
-			PISO_PACKET_INFO packetInfo = (PISO_PACKET_INFO)((PUCHAR)isoInfoBuf + sizeof(ISO_PACKET_INFO) * i);
-			packetInfo->Length = urb->UrbIsochronousTransfer.IsoPacket[i].Length;
-			packetInfo->Status = urb->UrbIsochronousTransfer.IsoPacket[i].Status;
+			MyDbgPrint(("SendNonEP0Data failed"));
+			goto Exit;
+		}
+
+		if (isoLen)
+		{
+			for (int i = 0; i < urb->UrbIsochronousTransfer.NumberOfPackets; i++)
+			{
+				PISO_PACKET_INFO packetInfo = (PISO_PACKET_INFO)((PUCHAR)isoInfoBuf + sizeof(ISO_PACKET_INFO) * i);
+				packetInfo->Length = urb->UrbIsochronousTransfer.IsoPacket[i].Length;
+				packetInfo->Status = urb->UrbIsochronousTransfer.IsoPacket[i].Status;
+			}
 		}
 	}
-
 Exit:
 	if (urb)
 	{

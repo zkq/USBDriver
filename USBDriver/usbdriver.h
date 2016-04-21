@@ -84,10 +84,10 @@ NTSTATUS CleanUp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 NTSTATUS DispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 
-
-NTSTATUS UrbCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
-NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension, PURB Urb, BOOLEAN IsUrbBuildByNewMethod = true, PIO_COMPLETION_ROUTINE SyncCompletionRoutine = UrbCompletionRoutine);
-NTSTATUS SubmitUrbASync(PDEVICE_EXTENSION DeviceExtension, PIRP Irp, PURB Urb, PIO_COMPLETION_ROUTINE CompletionRoutine, PVOID CompletionContext);
+NTSTATUS UrbAsyncSyncCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
+NTSTATUS UrbSyncCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
+NTSTATUS SubmitUrbSync(PDEVICE_EXTENSION DeviceExtension, PURB Urb, BOOLEAN IsUrbBuildByNewMethod = TRUE, PIO_COMPLETION_ROUTINE SyncCompletionRoutine = UrbSyncCompletionRoutine);
+NTSTATUS SubmitUrbAsync(PDEVICE_EXTENSION DeviceExtension, PIRP Irp, PURB Urb, BOOLEAN IsUrbBuildByNewMethod = TRUE, PIO_COMPLETION_ROUTINE CompletionRoutine = UrbAsyncSyncCompletionRoutine);
 
 //IOCTRL helper function
 NTSTATUS GetStatus(PDEVICE_EXTENSION pdx, PUSHORT status, UCHAR target, UCHAR index);
@@ -99,7 +99,7 @@ NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx);
 NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum);
 NTSTATUS GetConfiguration(PDEVICE_EXTENSION pdx, PUCHAR confNum);
 NTSTATUS GetInterface(PDEVICE_EXTENSION pdx, PUCHAR intfNum);
-NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen);
+NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, PIRP pIrp, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen);
 NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single);
 NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state);
 
