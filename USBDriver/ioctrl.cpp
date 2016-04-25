@@ -170,17 +170,6 @@ NTSTATUS SendNonEP0Direct(PDEVICE_EXTENSION pdx, PIRP pIrp)
 }
 
 
-NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter GetDriverVersion"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
-
-
 NTSTATUS GetUsbDIVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter GetUSBDIVersion"));
@@ -243,41 +232,6 @@ NTSTATUS SelIntface(PDEVICE_EXTENSION pdx, PIRP pIrp)
 }
 
 
-
-NTSTATUS GetAddress(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter GetAddress"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
-
-
-NTSTATUS GetNumEndpoints(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter GetNumEndpoints"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
-
-
-NTSTATUS GetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter GetPwrState"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-
-}
-
-
 NTSTATUS SetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter SetPwrState"));
@@ -295,27 +249,64 @@ NTSTATUS SetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	return status;
 }
 
-
-//重新连接USB设备  模拟物理  
-NTSTATUS CyclePort(PDEVICE_EXTENSION pdx, PIRP pIrp)
+NTSTATUS GetFriendlyName(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
-	MyDbgPrint(("Enter CyclePort"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	MyDbgPrint(("Enter GetFriendlyName"));
+	NTSTATUS status = -1;
+	PVOID buf = pIrp->AssociatedIrp.SystemBuffer;
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	ULONG len = stack->Parameters.DeviceIoControl.InputBufferLength;
 
-	PIO_STACK_LOCATION stack = IoGetNextIrpStackLocation(pIrp);
-	stack->Parameters.DeviceIoControl;
 
-	pIrp->IoStatus.Information = 0;
+	PCWSTR itemName = L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\Fx2lp";
+	PCWSTR keyName = L"FriendlyName";
+	ULONG realSize = 0;
+	status = GetRegister(itemName, keyName, (PSTR)buf, len, &realSize);
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? len : 0;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 	return status;
 }
+
+
+NTSTATUS AbortPipe(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter AbortPipe"));
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+	PUCHAR address = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	status = AbortPipe(pdx, *address);
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? sizeof(UCHAR) : 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+}
+
 
 
 NTSTATUS ResetPipe(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter ResetPipe"));
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	PUCHAR address = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	status = ResetPipe(pdx, *address);
+
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? sizeof(UCHAR) : 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+}
+
+
+
+
+NTSTATUS ResetParentPort(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter ResetParentPort"));
+	NTSTATUS status = ResetParentPort(pdx);
+
 	pIrp->IoStatus.Information = 0;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
@@ -323,10 +314,53 @@ NTSTATUS ResetPipe(PDEVICE_EXTENSION pdx, PIRP pIrp)
 }
 
 
-NTSTATUS ResetParentPort(PDEVICE_EXTENSION pdx, PIRP pIrp)
+NTSTATUS GetNumEndpoints(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
-	MyDbgPrint(("Enter ResetParentPort"));
+	MyDbgPrint(("Enter GetNumEndpoints"));
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
+	PUCHAR buf = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	ULONG len = stack->Parameters.DeviceIoControl.InputBufferLength;
+	if (pdx->pipeCount != 0)
+	{
+		buf[0] = pdx->pipeCount;
+		status = STATUS_SUCCESS;
+	}
+	pIrp->IoStatus.Information = NT_SUCCESS(status) ? len : 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+}
+
+
+NTSTATUS GetPwrState(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter GetPwrState"));
+	NTSTATUS status = STATUS_SUCCESS;
+
+
+	PUCHAR power = (PUCHAR)pIrp->AssociatedIrp.SystemBuffer;
+	*power = pdx->pwrState;
+
+
+	pIrp->IoStatus.Information = sizeof(UCHAR);
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+
+}
+
+
+
+
+//模拟重新连接USB设备
+NTSTATUS CyclePort(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter CyclePort"));
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+	SINGLE_TRANSFER single;
+
 	pIrp->IoStatus.Information = 0;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
@@ -360,28 +394,9 @@ NTSTATUS GetDiName(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter GetDiName"));
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
 
 
-NTSTATUS GetFriendlyName(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter GetFriendlyName"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
-	pIrp->IoStatus.Information = 0;
-	pIrp->IoStatus.Status = status;
-	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
-	return status;
-}
 
-
-NTSTATUS AbortPipe(PDEVICE_EXTENSION pdx, PIRP pIrp)
-{
-	MyDbgPrint(("Enter AbortPipe"));
-	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	pIrp->IoStatus.Information = 0;
 	pIrp->IoStatus.Status = status;
 	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
@@ -403,6 +418,28 @@ NTSTATUS GetSpeed(PDEVICE_EXTENSION pdx, PIRP pIrp)
 NTSTATUS GetCurrentFrame(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	MyDbgPrint(("Enter GetCurrentFrame"));
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	pIrp->IoStatus.Information = 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+}
+
+
+NTSTATUS GetAddress(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter GetAddress"));
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	pIrp->IoStatus.Information = 0;
+	pIrp->IoStatus.Status = status;
+	IoCompleteRequest(pIrp, IO_NO_INCREMENT);
+	return status;
+}
+
+
+NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp)
+{
+	MyDbgPrint(("Enter GetDriverVersion"));
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	pIrp->IoStatus.Information = 0;
 	pIrp->IoStatus.Status = status;

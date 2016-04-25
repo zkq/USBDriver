@@ -29,21 +29,30 @@ extern "C"
 
 #define arraysize(p) (sizeof(p)/sizeof(p[0]))
 
+
+
+extern GUID guid;
+extern UNICODE_STRING registryPath;
+
+
 typedef struct _PIPE_INFO
 {
 	UCHAR address;
+	BOOLEAN open;
 	USBD_PIPE_HANDLE handle;
 } PIPE_INFO, *PPIPE_INFO;
-
 typedef struct _DEVICE_EXTERNSION
 {
-	PDEVICE_OBJECT fdo;
-	PLIST_ENTRY pIrpListHead;
+	PDEVICE_OBJECT FunctionDevice;
 	PDEVICE_OBJECT NextStackDevice;
+	PDEVICE_OBJECT PhysicalDevice;
+
 	UNICODE_STRING ustrDeviceName;
 	UNICODE_STRING ustrSymbolicName;
+	
+	DEVICE_POWER_STATE pwrState;
 
-	PVOID BusContext;
+	FAST_MUTEX myMutex;
 	USBD_HANDLE UsbdHandle;
 	PUSB_DEVICE_DESCRIPTOR deviceDesc;
 	PUSB_CONFIGURATION_DESCRIPTOR confDesc;
@@ -52,15 +61,16 @@ typedef struct _DEVICE_EXTERNSION
 	PPIPE_INFO pipeInfos;
 } DEVICE_EXTENSION, *PDEVICE_EXTENSION;
 
+
+
 typedef struct _IRP_Entry
 {
 	PIRP pIrp;
 	LIST_ENTRY listEntry;
-
 } IRP_Entry, *PIRP_Entry;
 
 
-extern GUID guid;
+
 
 extern "C"
 NTSTATUS DriverEntry(IN PDRIVER_OBJECT pDriverObject, IN PUNICODE_STRING pRegistryPath);
@@ -74,15 +84,34 @@ VOID OnCancelIrp(IN PDEVICE_OBJECT pDev, IN PIRP pIrp);
 NTSTATUS AddDevice(IN PDRIVER_OBJECT pDriverObject, IN PDEVICE_OBJECT pPhyDeviceObject);
 
 
-NTSTATUS Pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
-NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp);
-NTSTATUS PnpStartDevice(PDEVICE_EXTENSION pdx, PIRP pIrp);
-NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp);
+NTSTATUS DispatchPnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS DefaultPnpHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp);
+NTSTATUS PnpStartDevice(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp);
+NTSTATUS PnpRemoveDevice(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp);
 
-NTSTATUS CreateFile(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
-NTSTATUS CleanUp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS DispatchCreate(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS DispatchCleanUp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
 NTSTATUS DispatchRoutine(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
-NTSTATUS DeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS DispatchDeviceIOControl(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+
+
+NTSTATUS DispatchPower(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp);
+NTSTATUS SystemQueryPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP Irp);
+NTSTATUS SystemSetPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP Irp);
+NTSTATUS DeviceQueryPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP Irp);
+NTSTATUS DeviceSetPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP Irp);
+VOID QueryPwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus);
+NTSTATUS OnQueryRequestComplete(PDEVICE_OBJECT pdo, PIRP pIrp, PVOID context);
+VOID SetPwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus);
+NTSTATUS OnSetRequestComplete(PDEVICE_OBJECT pdo, PIRP pIrp, PVOID context);
+
+
+
+
+
+
+
+
 
 NTSTATUS UrbAsyncSyncCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
 NTSTATUS UrbSyncCompletionRoutine(PDEVICE_OBJECT DeviceObject, PIRP Irp, PVOID Context);
@@ -102,8 +131,10 @@ NTSTATUS GetInterface(PDEVICE_EXTENSION pdx, PUCHAR intfNum);
 NTSTATUS SendNonEP0CtlData(PDEVICE_EXTENSION pdx, PIRP pIrp, UCHAR endAddress, PVOID isoInfoBuf, const ULONG isoLen, PVOID buffer, const ULONG bufLen);
 NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single);
 NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state);
-
-
+NTSTATUS GetRegister(IN PCWSTR itemName, IN PCWSTR keyName, OUT PSTR value, IN ULONG len, OUT PULONG realSize);
+NTSTATUS AbortPipe(PDEVICE_EXTENSION pdx, UCHAR address);
+NTSTATUS ResetPipe(PDEVICE_EXTENSION pdx, UCHAR address);
+NTSTATUS ResetParentPort(PDEVICE_EXTENSION pdx);
 
 //IO CTL Methods
 NTSTATUS GetDriverVersion(PDEVICE_EXTENSION pdx, PIRP pIrp);

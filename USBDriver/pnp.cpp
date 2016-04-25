@@ -8,7 +8,7 @@ VOID ShowResources(IN PCM_PARTIAL_RESOURCE_LIST list);
 
 
 #pragma PAGEDCODE
-NTSTATUS Pnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
+NTSTATUS DispatchPnp(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 {
 	PAGED_CODE();
 	MyDbgPrint((" Enter pnp"));
@@ -101,39 +101,24 @@ NTSTATUS DefaultPnpHandler(PDEVICE_EXTENSION pdx, PIRP pIrp)
 NTSTATUS PnpStartDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
 {
 	PAGED_CODE();
-	NTSTATUS status = ForwardAndWait(pdx, pIrp);
-
+	NTSTATUS status;
+	
+	
+	status = ForwardAndWait(pdx, pIrp);
 	if (!NT_SUCCESS(status))
 	{
 		pIrp->IoStatus.Status = status;
 		IoCompleteRequest(pIrp, IO_NO_INCREMENT);
 		return status;
 	}
-	MyDbgPrint((" show raw resources"));
-	PIO_STACK_LOCATION stack = IoGetNextIrpStackLocation(pIrp);
-	PCM_PARTIAL_RESOURCE_LIST raw;
-	if (stack->Parameters.StartDevice.AllocatedResources)
+
+	//使能设备接口
+	status = IoSetDeviceInterfaceState(&pdx->ustrSymbolicName, TRUE);
+	if (!NT_SUCCESS(status))
 	{
-		raw = &stack->Parameters.StartDevice.AllocatedResources->List[0].PartialResourceList;
-		MyDbgPrint((" show raw resources"));
-		ShowResources(raw);
+		return status;
 	}
 
-	else
-		raw = NULL;
-
-
-
-	PCM_PARTIAL_RESOURCE_LIST translated;
-	if (stack->Parameters.StartDevice.AllocatedResourcesTranslated)
-	{
-		translated = &stack->Parameters.StartDevice.AllocatedResourcesTranslated->List[0].PartialResourceList;
-		MyDbgPrint((" show translated resources"));
-		ShowResources(translated);
-	}
-
-	else
-		translated = NULL;
 
 
 	pIrp->IoStatus.Status = STATUS_SUCCESS;
@@ -150,13 +135,23 @@ NTSTATUS PnpRemoveDevice(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	pIrp->IoStatus.Status = STATUS_SUCCESS;
 	NTSTATUS status = DefaultPnpHandler(pdx, pIrp);
 
+
 	IoSetDeviceInterfaceState(&pdx->ustrSymbolicName, FALSE);
 	RtlFreeUnicodeString(&pdx->ustrSymbolicName);
+
+	if (pdx->deviceDesc)
+	ExFreePool(pdx->deviceDesc);
+	if (pdx->confDesc)
+	ExFreePool(pdx->confDesc);
+	if (pdx->pipeInfos)
+	ExFreePool(pdx->pipeInfos);
 
 	if (pdx->NextStackDevice)
 		IoDetachDevice(pdx->NextStackDevice);
 
-	IoDeleteDevice(pdx->fdo);
+	IoDeleteDevice(pdx->FunctionDevice);
+
+
 	return status;
 }
 
@@ -169,71 +164,35 @@ NTSTATUS ForwardAndWait(PDEVICE_EXTENSION pdx, PIRP pIrp)
 	PAGED_CODE();
 	MyDbgPrint((" Enter ForwardAndWait"));
 
+	NTSTATUS status;
 	KEVENT event;
 	KeInitializeEvent(&event, NotificationEvent, FALSE);
 
 	IoCopyCurrentIrpStackLocationToNext(pIrp);
-	IoSetCompletionRoutine(pIrp, (PIO_COMPLETION_ROUTINE)OnRequestComplete, &event, TRUE, TRUE, TRUE);
+	IoSetCompletionRoutine(pIrp, 
+				(PIO_COMPLETION_ROUTINE)OnRequestComplete, 
+				&event,
+				TRUE, 
+				TRUE, 
+				TRUE);
 
-	IoCallDriver(pdx->NextStackDevice, pIrp);
-	KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+	status = IoCallDriver(pdx->NextStackDevice, pIrp);
+	if (status == STATUS_PENDING)
+	{
+		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+		status = pIrp->IoStatus.Status;
+	}
 
-	MyDbgPrint((" leave ForwardAndWait"));
-	return pIrp->IoStatus.Status;
+	if (!NT_SUCCESS(status)) {
+		MyDbgPrint(("pnp Lower drivers failed this Irp\n"));
+	}
+
+	return status;
 }
 
 #pragma LOCKEDCODE
-NTSTATUS OnRequestComplete(PDEVICE_OBJECT junk, PIRP pIrp, PKEVENT pEvent)
+NTSTATUS OnRequestComplete(PDEVICE_OBJECT pDo, PIRP pIrp, PKEVENT pEvent)
 {
 	KeSetEvent(pEvent, 0, FALSE);
 	return STATUS_MORE_PROCESSING_REQUIRED;
-}
-
-#pragma PAGEDCODE
-VOID ShowResources(IN PCM_PARTIAL_RESOURCE_LIST list)
-{
-	//枚举资源
-	PCM_PARTIAL_RESOURCE_DESCRIPTOR resource = list->PartialDescriptors;
-	ULONG nres = list->Count;
-	ULONG i;
-
-	for (i = 0; i < nres; ++i, ++resource)
-	{						// for each resource
-		ULONG type = resource->Type;
-
-		static char* name[] = {
-			"CmResourceTypeNull",
-			"CmResourceTypePort",
-			"CmResourceTypeInterrupt",
-			"CmResourceTypeMemory",
-			"CmResourceTypeDma",
-			"CmResourceTypeDeviceSpecific",
-			"CmResourceTypeBusNumber",
-			"CmResourceTypeDevicePrivate",
-			"CmResourceTypeAssignedResource",
-			"CmResourceTypeSubAllocateFrom",
-		};
-
-		MyDbgPrint((" type %s", type < arraysize(name) ? name[type] : "unknown"));
-
-		switch (type)
-		{					// select on resource type
-		case CmResourceTypePort:
-		case CmResourceTypeMemory:
-			MyDbgPrint((" start %8X%8.8lX length %X\n",
-				resource->u.Port.Start.HighPart, resource->u.Port.Start.LowPart,
-				resource->u.Port.Length));
-			break;
-
-		case CmResourceTypeInterrupt:
-			MyDbgPrint(("  level %X, vector %X, affinity %X\n",
-				resource->u.Interrupt.Level, resource->u.Interrupt.Vector,
-				resource->u.Interrupt.Affinity));
-			break;
-
-		case CmResourceTypeDma:
-			MyDbgPrint(("  channel %d, port %X\n",
-				resource->u.Dma.Channel, resource->u.Dma.Port));
-		}
-	}
-}							
+}					

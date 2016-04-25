@@ -197,12 +197,15 @@ NTSTATUS GetDeviceDesc(PDEVICE_EXTENSION pdx, bool refresh)
 		status = STATUS_SUCCESS;
 		return status;
 	}
+
+	ExAcquireFastMutex(&pdx->myMutex);
 	if (pdx->deviceDesc)
 	{
 		ExFreePool(pdx->deviceDesc);
 	}
-
 	pdx->deviceDesc = (PUSB_DEVICE_DESCRIPTOR)ExAllocatePool(NonPagedPool, sizeof(USB_DEVICE_DESCRIPTOR));
+	ExReleaseFastMutex(&pdx->myMutex);
+
 	if (!pdx->deviceDesc)
 	{
 		status = STATUS_INSUFFICIENT_RESOURCES;
@@ -213,7 +216,9 @@ NTSTATUS GetDeviceDesc(PDEVICE_EXTENSION pdx, bool refresh)
 	USBD_UrbAllocate(pdx->UsbdHandle, &urb);
 	UsbBuildGetDescriptorRequest(urb, sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST),
 		USB_DEVICE_DESCRIPTOR_TYPE, 0, 0, pdx->deviceDesc, NULL, sizeof(USB_DEVICE_DESCRIPTOR), NULL);
+	//ExAcquireFastMutex(&pdx->myMutex);
 	status = SubmitUrbSync(pdx, urb);
+	//ExReleaseFastMutex(&pdx->myMutex);
 	USBD_UrbFree(pdx->UsbdHandle, urb);
 	return status;
 }
@@ -229,13 +234,17 @@ NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh)
 		status = STATUS_SUCCESS;
 		return status;
 	}
+
+	ExAcquireFastMutex(&pdx->myMutex);
 	if (pdx->confDesc)
 	{
 		ExFreePool(pdx->confDesc);
 	}
-
 	//第一步获取大小
 	pdx->confDesc = (PUSB_CONFIGURATION_DESCRIPTOR)ExAllocatePool(NonPagedPool, sizeof(USB_CONFIGURATION_DESCRIPTOR));
+	ExReleaseFastMutex(&pdx->myMutex);
+
+
 	if (!pdx->confDesc)
 	{
 		status = STATUS_INSUFFICIENT_RESOURCES;
@@ -246,7 +255,10 @@ NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh)
 	USBD_UrbAllocate(pdx->UsbdHandle, &urb);
 	UsbBuildGetDescriptorRequest(urb, sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST),
 		USB_CONFIGURATION_DESCRIPTOR_TYPE, 0, 0, pdx->confDesc, NULL, sizeof(USB_CONFIGURATION_DESCRIPTOR), NULL);
+	//ExAcquireFastMutex(&pdx->myMutex);
 	status = SubmitUrbSync(pdx, urb);
+	//ExReleaseFastMutex(&pdx->myMutex);
+
 	USBD_UrbFree(pdx->UsbdHandle, urb);
 	if (!NT_SUCCESS(status))
 	{
@@ -255,8 +267,10 @@ NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh)
 
 	//第二步获取完整的
 	ULONG size = pdx->confDesc->wTotalLength;
+	ExAcquireFastMutex(&pdx->myMutex);
 	ExFreePool(pdx->confDesc);
 	pdx->confDesc = (PUSB_CONFIGURATION_DESCRIPTOR)ExAllocatePool(NonPagedPool, size);
+	ExReleaseFastMutex(&pdx->myMutex);
 	if (!pdx->confDesc)
 	{
 		status = STATUS_INSUFFICIENT_RESOURCES;
@@ -266,7 +280,11 @@ NTSTATUS GetConfDesc(PDEVICE_EXTENSION pdx, bool refresh)
 	USBD_UrbAllocate(pdx->UsbdHandle, &urb2);
 	UsbBuildGetDescriptorRequest(urb2, sizeof(_URB_CONTROL_DESCRIPTOR_REQUEST),
 		USB_CONFIGURATION_DESCRIPTOR_TYPE, 0, 0, pdx->confDesc, NULL, size, NULL);
+
+	//ExAcquireFastMutex(&pdx->myMutex);
 	status = SubmitUrbSync(pdx, urb2);
+	//ExReleaseFastMutex(&pdx->myMutex);
+
 	USBD_UrbFree(pdx->UsbdHandle, urb2);
 	return status;
 }
@@ -358,14 +376,6 @@ NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx)
 			interfaceDescriptor = (PUSB_INTERFACE_DESCRIPTOR)(StartPosition + pdx->confDesc->bLength);
 		else
 			interfaceDescriptor = NULL;
-		//interfaceDescriptor = USBD_ParseConfigurationDescriptorEx(
-		//	pdx->confDesc,
-		//	StartPosition, // StartPosition 
-		//	-1,            // InterfaceNumber
-		//	0,             // AlternateSetting
-		//	-1,            // InterfaceClass
-		//	-1,            // InterfaceSubClass
-		//	-1);           // InterfaceProtocol
 
 		if (!interfaceDescriptor)
 		{
@@ -417,33 +427,29 @@ NTSTATUS SelectConfiguration(PDEVICE_EXTENSION pdx)
 		ULONG i;
 
 		Interface = interfaceList[interfaceIndex].Interface;
+
+		KIRQL oldIrql;
+		ExAcquireFastMutex(&pdx->myMutex);
 		pdx->pipeCount = Interface->NumberOfPipes;
 		if (pdx->pipeInfos)
 			ExFreePool(pdx->pipeInfos);
 		pdx->pipeInfos = (PPIPE_INFO)ExAllocatePool(NonPagedPool, sizeof(PIPE_INFO) * pdx->pipeCount);
+		ExReleaseFastMutex(&pdx->myMutex);
+
 		if (!pdx->pipeInfos)
 		{
 			MyDbgPrint(("allocate pipeinfo failed"));
 			goto Exit;
 		}
 
+		ExAcquireFastMutex(&pdx->myMutex);
 		for (i = 0; i < Interface->NumberOfPipes; i++)
 		{
 			pdx->pipeInfos[i].address = Interface->Pipes[i].EndpointAddress;
 			pdx->pipeInfos[i].handle = Interface->Pipes[i].PipeHandle;
-			//if (Interface->Pipes[i].PipeType == UsbdPipeTypeInterrupt)
-			//{
-			//	pdx->InterruptPipe = pipeHandle;
-			//}
-			//if (Interface->Pipes[i].PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_IN(Interface->Pipes[i].EndpointAddress))
-			//{
-			//	pdx->BulkInPipe = pipeHandle;
-			//}
-			//if (Interface->Pipes[i].PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_OUT(Interface->Pipes[i].EndpointAddress))
-			//{
-			//	pdx->BulkOutPipe = pipeHandle;
-			//}
+			pdx->pipeInfos[i].open = TRUE;
 		}
+		ExReleaseFastMutex(&pdx->myMutex);
 	}
 
 Exit:
@@ -551,14 +557,6 @@ NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum)
 		StartPosition += size;
 		temp = (PUSB_INTERFACE_DESCRIPTOR)StartPosition;
 	}
-	//interfaceDescriptor = USBD_ParseConfigurationDescriptorEx(
-	//	pdx->confDesc,
-	//	StartPosition, // StartPosition 
-	//	0,            // InterfaceNumber
-	//	altIntNum,    // AlternateSetting
-	//	-1,            // InterfaceClass
-	//	-1,            // InterfaceSubClass
-	//	-1);           // InterfaceProtocol
 	if (!interfaceDescriptor)
 	{
 		MyDbgPrint(("get interfacedesc failed"));
@@ -594,32 +592,28 @@ NTSTATUS SelectInterface(PDEVICE_EXTENSION pdx, UCHAR altIntNum)
 	// information.
 
 	Interface = interfaceList->Interface;
+	KIRQL oldIrql;
+	ExAcquireFastMutex(&pdx->myMutex);
 	pdx->pipeCount = Interface->NumberOfPipes;
 	if (pdx->pipeInfos)
 		ExFreePool(pdx->pipeInfos);
 	pdx->pipeInfos = (PPIPE_INFO)ExAllocatePool(NonPagedPool, sizeof(PIPE_INFO) * pdx->pipeCount);
+	ExReleaseFastMutex(&pdx->myMutex);
+
 	if (!pdx->pipeInfos)
 	{
 		MyDbgPrint(("allocate pipeinfo failed"));
 		goto Exit;
 	}
+
+	ExAcquireFastMutex(&pdx->myMutex);
 	for (UCHAR i = 0; i < Interface->NumberOfPipes; i++)
 	{
 		pdx->pipeInfos[i].address = Interface->Pipes[i].EndpointAddress;
 		pdx->pipeInfos[i].handle = Interface->Pipes[i].PipeHandle;
-		//if (Interface->Pipes[i].PipeType == UsbdPipeTypeInterrupt)
-		//{
-		//	pdx->InterruptPipe = pipeHandle;
-		//}
-		//if (Interface->Pipes[i].PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_IN(Interface->Pipes[i].EndpointAddress))
-		//{
-		//	pdx->BulkInPipe = pipeHandle;
-		//}
-		//if (Interface->Pipes[i].PipeType == UsbdPipeTypeBulk && USB_ENDPOINT_DIRECTION_OUT(Interface->Pipes[i].EndpointAddress))
-		//{
-		//	pdx->BulkOutPipe = pipeHandle;
-		//}
+		pdx->pipeInfos[i].open = TRUE;
 	}
+	ExReleaseFastMutex(&pdx->myMutex);
 
 Exit:
 
@@ -743,35 +737,228 @@ NTSTATUS VendorRequest(PDEVICE_EXTENSION pdx, PSINGLE_TRANSFER single)
 	return status;
 }
 
-
-VOID PwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
+VOID SetPwrComplete2(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus);
+VOID QueryPwrComplete2(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
 {
-	
-	if (IoStatus->Status == STATUS_SUCCESS && MinorFunction == IRP_MN_QUERY_POWER)
+	MyDbgPrint(("enter QueryPwrComplete2"));
+	if (IoStatus->Status == STATUS_SUCCESS)
 	{
+		MyDbgPrint(("success"));
 		NTSTATUS status;
-		KEVENT event;
-		KeInitializeEvent(&event, NotificationEvent, FALSE);
-		status = PoRequestPowerIrp(DeviceObject, IRP_MN_SET_POWER, PowerState, PwrComplete, &event, NULL);
-		if (status == STATUS_PENDING)
-		{
-			KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
-		}
+		KEVENT event2;
+		KeInitializeEvent(&event2, NotificationEvent, FALSE);
+		PoRequestPowerIrp(DeviceObject, IRP_MN_SET_POWER, PowerState, SetPwrComplete2, &event2, NULL);
 	}
 	PKEVENT event = (PKEVENT)Context;
 	KeSetEvent(event, IO_NO_INCREMENT, FALSE);
+	MyDbgPrint(("leave QueryPwrComplete2"));
+}
+
+VOID SetPwrComplete2(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
+{
+	MyDbgPrint(("enter SetPwrComplete2"));
+	if (IoStatus->Status == STATUS_SUCCESS)
+	{
+		MyDbgPrint(("success"));
+	}
+	//PKEVENT event = (PKEVENT)Context;
+	//KeSetEvent(event, IO_NO_INCREMENT, FALSE);
+	MyDbgPrint(("leave SetPwrComplete2"));
 }
 
 
 NTSTATUS SetPwr(PDEVICE_EXTENSION pdx, POWER_STATE state)
 {
+	MyDbgPrint(("enter setpwr help"));
 	NTSTATUS status;
 	KEVENT event;
 	KeInitializeEvent(&event, NotificationEvent, FALSE);
-	status = PoRequestPowerIrp(pdx->fdo, IRP_MN_QUERY_POWER, state, PwrComplete, &event, NULL);
+	status = PoRequestPowerIrp(pdx->NextStackDevice, IRP_MN_QUERY_POWER, state, QueryPwrComplete2, &event, NULL);
 	if (status == STATUS_PENDING)
 	{
 		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
 	}
+	MyDbgPrint(("leave setpwr help"));
 	return STATUS_SUCCESS;
+}
+
+
+
+NTSTATUS GetRegister(IN PCWSTR itemName, IN PCWSTR keyName, OUT PSTR value, IN ULONG len, OUT PULONG realSize)
+{
+	NTSTATUS status;
+	HANDLE hReg;
+	UNICODE_STRING regString;
+	RtlInitUnicodeString(&regString, itemName);
+
+	OBJECT_ATTRIBUTES objectAttributes;
+	InitializeObjectAttributes(&objectAttributes, &regString, OBJ_CASE_INSENSITIVE, NULL, NULL);
+	status = ZwOpenKey(&hReg, KEY_ALL_ACCESS, &objectAttributes);
+	if (!NT_SUCCESS(status))
+	{
+		MyDbgPrint(("open reg failed"));
+		return status;
+	}
+
+
+	UNICODE_STRING valuName;
+	RtlInitUnicodeString(&valuName, keyName);
+	status = ZwQueryValueKey(hReg, &valuName,
+		KeyValuePartialInformation, NULL, len, realSize);
+
+	if (status == STATUS_OBJECT_NAME_NOT_FOUND || *realSize == 0)
+	{
+		ZwClose(hReg);
+		MyDbgPrint(("reg key not found"));
+		return status;
+	}
+
+	PKEY_VALUE_PARTIAL_INFORMATION info = (PKEY_VALUE_PARTIAL_INFORMATION)
+		ExAllocatePool(PagedPool, *realSize);
+	status = ZwQueryValueKey(hReg, &valuName,
+		KeyValuePartialInformation, info, *realSize, realSize);
+	if (!NT_SUCCESS(status))
+	{
+		ZwClose(hReg);
+		MyDbgPrint(("read reg error"));
+		return status;
+	}
+
+	for (int i = 0; i < *realSize; i += 2)
+	{
+		value[i / 2] = info->Data[i];
+	}
+
+	return status;
+}
+
+
+NTSTATUS AbortPipe(PDEVICE_EXTENSION pdx, UCHAR address)
+{
+	NTSTATUS status = -1;
+	if (pdx->pipeCount == 0) {
+		return STATUS_SUCCESS;
+	}
+
+	for (int i = 0; i < pdx->pipeCount; i++) {
+		MyDbgPrint(("pipe address %d", pdx->pipeInfos[i].address));
+		if (pdx->pipeInfos[i].address == address) {
+			status = STATUS_SUCCESS;
+			if (pdx->pipeInfos[i].open)
+			{
+				PURB urb;
+				urb = (PURB)ExAllocatePool(NonPagedPool,
+					sizeof(struct _URB_PIPE_REQUEST));
+
+				if (urb) {
+					urb->UrbHeader.Length = sizeof(struct _URB_PIPE_REQUEST);
+					urb->UrbHeader.Function = URB_FUNCTION_ABORT_PIPE;
+					urb->UrbPipeRequest.PipeHandle = pdx->pipeInfos[i].handle;
+					status = SubmitUrbSync(pdx, urb, FALSE);
+					if (NT_SUCCESS(status)) {
+						pdx->pipeInfos[i].open = FALSE;
+					}
+					ExFreePool(urb);
+				}
+				else {
+					MyDbgPrint(("Failed to alloc urb\n"));
+					status = STATUS_INSUFFICIENT_RESOURCES;
+				}
+			}
+			break;
+		}
+	}
+
+	return status;
+}
+
+
+NTSTATUS ResetPipe(PDEVICE_EXTENSION pdx, UCHAR address)
+{
+	NTSTATUS status = -1;
+	if (pdx->pipeCount == 0) {
+		return STATUS_SUCCESS;
+	}
+
+	for (int i = 0; i < pdx->pipeCount; i++) {
+		if (pdx->pipeInfos[i].address == address) {
+			PURB urb;
+			MyDbgPrint(("Aborting open pipe %d\n", i));
+			urb = (PURB)ExAllocatePool(NonPagedPool,
+				sizeof(struct _URB_PIPE_REQUEST));
+
+			if (urb) {
+				urb->UrbHeader.Length = sizeof(struct _URB_PIPE_REQUEST);
+				urb->UrbHeader.Function = URB_FUNCTION_RESET_PIPE;
+				urb->UrbPipeRequest.PipeHandle =
+					pdx->pipeInfos[i].handle;
+				status = SubmitUrbSync(pdx, urb, FALSE);
+				if (NT_SUCCESS(status)) {
+					pdx->pipeInfos[i].open = TRUE;
+				}
+				ExFreePool(urb);
+			}
+			else {
+				MyDbgPrint(("Failed to alloc urb\n"));
+				status = STATUS_INSUFFICIENT_RESOURCES;
+			}
+			break;
+		}
+	}
+
+	return status;
+}
+
+
+NTSTATUS ResetParentPort(PDEVICE_EXTENSION pdx)
+{
+	NTSTATUS           status;
+	KEVENT             event;
+	PIRP               irp;
+	IO_STATUS_BLOCK    ioStatus;
+	PIO_STACK_LOCATION nextStack;
+
+
+	MyDbgPrint(("enter resetParentPort"));
+
+	KeInitializeEvent(&event, NotificationEvent, FALSE);
+
+	irp = IoBuildDeviceIoControlRequest(
+		IOCTL_INTERNAL_USB_RESET_PORT,
+		pdx->NextStackDevice,
+		NULL,
+		0,
+		NULL,
+		0,
+		TRUE,
+		&event,
+		&ioStatus);
+
+	if (NULL == irp) {
+
+		MyDbgPrint(("memory alloc for irp failed"));
+		return STATUS_INSUFFICIENT_RESOURCES;
+	}
+
+	nextStack = IoGetNextIrpStackLocation(irp);
+
+	ASSERT(nextStack != NULL);
+
+	status = IoCallDriver(pdx->NextStackDevice, irp);
+
+	if (STATUS_PENDING == status) {
+
+		KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+	}
+	else {
+
+		ioStatus.Status = status;
+	}
+
+	status = ioStatus.Status;
+
+	MyDbgPrint(("leave resetParentPort"));
+
+	return status;
+
 }
