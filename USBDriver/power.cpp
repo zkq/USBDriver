@@ -54,11 +54,19 @@ NTSTATUS DispatchPower(IN PDEVICE_OBJECT pFdo, IN PIRP pIrp)
 	return status;
 }
 
+
+
+
+//系统电源查询************************************************
 VOID QueryPwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
 {
 	MyDbgPrint(("Enter QueryPwrComplete"));
 	DisplayProcessName();
 
+	if (!NT_SUCCESS(IoStatus->Status))
+	{
+		MyDbgPrint(("sysquery failed"));
+	}
 	PIRP sysIrp = (PIRP)Context;
 	sysIrp->IoStatus.Status = IoStatus->Status;
 	IoCompleteRequest(sysIrp, IO_NO_INCREMENT);
@@ -79,6 +87,7 @@ NTSTATUS OnQueryRequestComplete(PDEVICE_OBJECT pdo, PIRP pIrp, PVOID context)
 	}
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
 	POWER_STATE state;
+	MyDbgPrint(("system querypower is%d", stack->Parameters.Power.State.SystemState));
 	if (stack->Parameters.Power.State.SystemState == PowerSystemWorking)
 		state.DeviceState = PowerDeviceD0;
 	else
@@ -98,10 +107,16 @@ NTSTATUS SystemQueryPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp)
 	IoSetCompletionRoutine(pIrp, OnQueryRequestComplete, NULL, TRUE, TRUE, TRUE);
 
 	IoCallDriver(pdx->NextStackDevice, pIrp);
-	MyDbgPrint(("Enter SystemQueryPowerHandler"));
+	MyDbgPrint(("Leave SystemQueryPowerHandler"));
 	return STATUS_PENDING;
 }
+//系统电源查询************************************************
 
+
+
+
+
+//系统电源设置************************************************
 VOID SetPwrComplete(PDEVICE_OBJECT DeviceObject, UCHAR MinorFunction, POWER_STATE PowerState, PVOID Context, PIO_STATUS_BLOCK IoStatus)
 {
 	MyDbgPrint(("enter SetPwrComplete"));
@@ -131,11 +146,12 @@ NTSTATUS OnSetRequestComplete(PDEVICE_OBJECT pdo, PIRP pIrp, PVOID context)
 	}
 	PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(pIrp);
 	POWER_STATE state;
+	MyDbgPrint(("system setpower is%d", stack->Parameters.Power.State.SystemState));
 	if (stack->Parameters.Power.State.SystemState == PowerSystemWorking)
 		state.DeviceState = PowerDeviceD0;
 	else
 		state.DeviceState = PowerDeviceD3;
-	PoRequestPowerIrp(pdo, IRP_MN_QUERY_POWER, state, SetPwrComplete, pIrp, NULL);
+	PoRequestPowerIrp(pdo, IRP_MN_SET_POWER, state, SetPwrComplete, pIrp, NULL);
 	MyDbgPrint(("leave OnSetRequestComplete"));
 	return STATUS_MORE_PROCESSING_REQUIRED;
 }
@@ -155,13 +171,13 @@ NTSTATUS SystemSetPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp)
 
 
 }
+//系统电源设置************************************************
 
 
 
 
 
-
-
+//设备电源询问*****************************
 NTSTATUS DeviceQueryPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp)
 {
 	MyDbgPrint(("Enter DeviceQueryPowerHandler"));
@@ -172,8 +188,10 @@ NTSTATUS DeviceQueryPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp)
 	MyDbgPrint(("leave DeviceQueryPowerHandler"));
 	return STATUS_PENDING;
 }
+//设备电源询问**********************************
 
 
+//设备电源设置*************************************
 NTSTATUS OnDeviceSetComplete(PDEVICE_OBJECT pdo, PIRP pIrp, PVOID context)
 {
 	MyDbgPrint(("enter OnDeviceSetComplete"));
@@ -206,3 +224,4 @@ NTSTATUS DeviceSetPowerHandler(IN PDEVICE_EXTENSION pdx, IN PIRP pIrp)
 	MyDbgPrint(("leave DeviceSetPowerHandler"));
 	return STATUS_PENDING;
 }
+//设备电源设置*************************************
